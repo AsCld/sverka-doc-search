@@ -7,6 +7,7 @@ import { docsView, docPage } from './docs.js';
 import { docBody, scrollToHit } from './viewer.js';
 import { esc, icon, anchor, fmtDate, toast, modal, confirmDialog, nDocs } from './ui.js';
 import { ACCEPT } from './ingest.js';
+import { initFx, lattice } from './fx.js';
 
 const $ = (s) => document.querySelector(s);
 const main = $('#main');
@@ -90,7 +91,7 @@ function renderSidebar() {
     <a href="#/" class="btn btn-primary new-chat">${icon('plus', 'sm')}Новый диалог</a>
     <nav class="nav" aria-label="Разделы">
       <a href="#/docs" class="${r.view === 'docs' || r.view === 'doc' ? 'active' : ''}" ${r.view === 'docs' ? 'aria-current="page"' : ''}>${icon('docs')}<span>Документы</span>
-        ${errs ? `<span class="badge warn" title="Требуют внимания">${errs}</span>` : proc ? `<span class="badge info"><span class="spin" aria-hidden="true"></span>${proc}</span>` : `<span class="count">${liveDocs().length}</span>`}</a>
+        ${errs ? `<span class="badge warn" title="Требуют внимания">${errs}</span>` : proc ? `<span class="badge info">${lattice({ pattern: 'snake', mini: true })}${proc}</span>` : `<span class="count">${liveDocs().length}</span>`}</a>
       <a href="#/saved" class="${r.view === 'saved' ? 'active' : ''}" ${r.view === 'saved' ? 'aria-current="page"' : ''}>${icon('bookmark')}<span>Сохранённые</span><span class="count">${state.saved.length}</span></a>
     </nav>
     ${errs ? `<a class="side-alert" href="#/docs?status=error">${icon('alert', 'sm')}${errs} ${errs === 1 ? 'файл требует' : 'файла требуют'} внимания</a>` : ''}
@@ -205,7 +206,7 @@ function savedView() {
         const lead = s.answer.blocks.find((b) => b.t === 'p')?.text.replace(/\*\*/g, '').replace(/\s*\[\d+\]/g, '') || '';
         const alive = getChat(s.chatId);
         const missing = s.answer.sources.filter((x) => { const d = getDoc(x.docId); return !d || d.deletedAt; }).length;
-        return `<li class="saved-card"><p class="saved-q">${icon('chat', 'sm')}${esc(s.question)}</p><p class="saved-a">${esc(lead)}</p>
+        return `<li class="saved-card spot"><p class="saved-q">${icon('chat', 'sm')}${esc(s.question)}</p><p class="saved-a">${esc(lead)}</p>
           <div class="saved-src">${s.answer.sources.map((x) => `<span class="src-pill">${x.n} · ${esc(x.docName)}</span>`).join('')}</div>
           ${missing ? `<p class="banner warn">${icon('alert', 'sm')}${missing} ${missing === 1 ? 'источник недоступен' : 'источника недоступны'}: документ удалён или в корзине.</p>` : ''}
           <div class="row-actions"><span class="muted">${fmtDate(s.savedAt)}</span>${alive ? `<a class="btn btn-sm btn-ghost" href="#/c/${s.chatId}?m=${s.msgId}">${icon('open', 'sm')}Открыть в диалоге</a>` : '<span class="muted">диалог удалён</span>'}<button type="button" class="btn btn-sm btn-ghost" data-unsave="${s.id}">${icon('x', 'sm')}Убрать</button></div></li>`;
@@ -289,4 +290,5 @@ addEventListener('keydown', (e) => {
 addEventListener('hashchange', route);
 addEventListener('pagehide', flush);
 subscribe(() => { cur.view?.update(cur.route); renderSidebar(); renderPanel(); });
+initFx();
 route();

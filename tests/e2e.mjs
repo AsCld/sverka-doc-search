@@ -30,7 +30,7 @@ let n = 0;
 async function step(name, fn) {
   n++;
   try { await fn(); console.log(`✓ ${n}. ${name}`); }
-  catch (e) { console.log(`✗ ${n}. ${name}\n   ${e.message.split('\n')[0]}`); await page.screenshot({ path: `/tmp/e2e-fail-${n}.png` }); process.exitCode = 1; }
+  catch (e) { console.log(`✗ ${n}. ${name}\n   ${e.message.split('\n').slice(0, 6).join(' ')}`); await page.screenshot({ path: `/tmp/e2e-fail-${n}.png` }); process.exitCode = 1; }
 }
 const shot = async (name, p = page) => SHOTS && (await p.waitForTimeout(300), p.screenshot({ path: SHOTS + name + '.png' }));
 const text = (sel) => page.locator(sel).innerText();
@@ -60,7 +60,7 @@ await step('Загрузка демо-набора: очередь → обра�
   await page.waitForSelector('.st-proc, .st-queued');
   await shot('02-processing');
   await page.waitForFunction(() => !document.querySelector('.st-proc, .st-queued'), null, { timeout: 30000 });
-  assert.equal(await page.locator('.doc-row .st-ready').count(), 6);
+  assert.equal(await page.locator('.doc-row .st-ready').count(), 16);
   assert.equal(await page.locator('.doc-row .st-error').count(), 1);
   assert.match(await text('.doc-row.err'), /нет текстового слоя/);
   assert.match(await text('#sidebar'), /требует внимания/);
@@ -69,7 +69,7 @@ await step('Загрузка демо-набора: очередь → обра�
 
 await step('Поиск по названию, фильтр по статусу, поиск без результатов', async () => {
   await page.fill('#docSearch', 'протокол');
-  assert.equal(await page.locator('.doc-row').count(), 2);
+  assert.equal(await page.locator('.doc-row').count(), 4);
   await page.fill('#docSearch', 'несуществующий');
   assert.match(await text('#docList'), /Ничего не найдено/);
   await page.click('[data-act=clear]');
@@ -206,7 +206,7 @@ await step('Перемещение документа в другую колле
   await page.locator('.doc-row:has-text("План_поставок") [data-act=move]').click();
   await page.click('dialog .opt:has-text("Нормативные документы")');
   await page.click('dialog button:has-text("Переместить")');
-  await page.waitForFunction(() => [...document.querySelectorAll('.group')].some((g) => g.querySelector('.group-h').textContent.includes('Нормативные документы') && g.querySelectorAll('.doc-row').length === 2));
+  await page.waitForFunction(() => [...document.querySelectorAll('.group')].some((g) => g.querySelector('.group-h').textContent.includes('Нормативные документы') && g.querySelectorAll('.doc-row').length === 3));
 });
 
 await step('Удаление с отменой, корзина и восстановление', async () => {
@@ -238,7 +238,7 @@ await step('Загрузка своих файлов: TXT готов, XLSX — �
     { name: 'Смета.xlsx', mimeType: 'application/octet-stream', buffer: Buffer.from('PK fake') },
   ]);
   await page.waitForFunction(() => !document.querySelector('.st-proc, .st-queued'), null, { timeout: 15000 });
-  assert.match(await text('.doc-row:has-text("Памятка")'), /Готов к поиску/);
+  assert.match(await text('.doc-row:has-text("Памятка_пропускной")'), /Готов к поиску/);
   assert.match(await text('.doc-row:has-text("Смета")'), /не поддерживается/);
   await page.goto(BASE + '#/');
   await page.click('.scope-chip');
@@ -258,18 +258,19 @@ await step('Перетаскивание файла в коллекцию', asyn
     dt.items.add(new File(['# Заявка\n\nЗаявка на щебень согласована 02.10.2026.'], 'Заявка_щебень.md', { type: 'text/markdown' }));
     for (const type of ['dragenter', 'dragover', 'drop']) window.dispatchEvent(new DragEvent(type, { dataTransfer: dt, bubbles: true, cancelable: true }));
   });
-  await page.waitForFunction(() => document.querySelector('.doc-row')?.innerText.includes('Заявка_щебень.md') && document.querySelector('.doc-row .st-ready'));
+  await page.waitForFunction(() => [...document.querySelectorAll('.doc-row')].some((r) => r.innerText.includes('Заявка_щебень.md') && r.querySelector('.st-ready')));
   assert.match(await text('#docTitle'), /Снабжение/);
 });
 
 await step('Обновление страницы: данные сохраняются, прямые ссылки открываются', async () => {
+  await page.waitForTimeout(300); // сохранение в localStorage отложено на 150 мс
   const docsBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('sverka.v1')).docs.length);
   await page.reload();
   const id = await page.evaluate(() => JSON.parse(localStorage.getItem('sverka.v1')).chats.find((c) => c.title.includes('пропуск')).id);
   await page.goto(BASE + '#/c/' + id);
   await page.waitForSelector('.msg.agent');
   assert.match(await lastAnswer().innerText(), /5 рабочих дней/);
-  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sverka.v1')).docs.length), docsBefore);
+  assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('sverka.v1')).docs.length), docsBefore, 'docs after reload');
   const p2 = await ctx.newPage();
   await p2.goto(firstChat.replace(/\?.*/, '') + '?src=' + await page.evaluate(() => {
     const c = JSON.parse(localStorage.getItem('sverka.v1')).chats.find((x) => x.messages.some((m) => m.answer?.curatedId === 'deadline'));

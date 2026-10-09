@@ -5,6 +5,8 @@ import { state, liveDocs, doc as getDoc, collection, retryDocs, canRetry, moveDo
 import { esc, icon, fmtSize, fmtDate, statusBadge, TYPE, toast, modal, confirmDialog, promptDialog, nDocs, plural, reveal } from './ui.js';
 import { docBody, scrollToHit } from './viewer.js';
 import { ACCEPT } from './ingest.js';
+import { lattice, fuseButton } from './fx.js';
+import { crumple, prewarm } from './crumple.js';
 
 const FILTERS = [
   { id: 'all', label: 'Все' },
@@ -70,13 +72,32 @@ export async function moveDialog(ids) {
 
 export function trashWithUndo(ids) {
   trashDocs(ids);
-  toast(ids.length === 1 ? 'Документ перемещён в корзину и исключён из поиска.' : `${nDocs(ids.length)} в корзине и исключены из поиска.`, { action: 'Отменить', onAction: () => restoreDocs(ids) });
+  toast(ids.length === 1 ? 'Документ перемещён в корзину и исключён из поиска.' : `${nDocs(ids.length)} в корзине и исключены из поиска.`, { action: 'Отменить', undo: true, onAction: () => restoreDocs(ids) });
 }
 
 function askAbout(ids) {
   state.newScope = { type: 'docs', ids };
   commit();
   location.hash = '#/';
+}
+
+// Документ в корзину: лист с его названием комкается и летит к ссылке «Корзина» (PaperCrumple).
+function toBin(ids) {
+  ids.slice(0, 3).forEach((id, i) => {
+    const row = document.querySelector(`.doc-row[data-k="${CSS.escape(id)}"] .ftype`);
+    const d = getDoc(id);
+    if (row && d) crumple(row.getBoundingClientRect(), { name: d.name, ext: d.ext, delay: i * 120, target: () => document.querySelector('.trash-link a') });
+  });
+}
+
+// Сводка над списком: числа «добегают» до значения (CountUp) — видно, как растёт готовность к поиску.
+function statsHtml() {
+  const live = liveDocs();
+  if (!live.length) return '';
+  const ready = live.filter((d) => d.status === 'ready');
+  const chunks = ready.reduce((n, d) => n + (d.chunks || 0), 0);
+  const stat = (key, label, n, tail = '') => `<span class="stat"><span>${label}</span><b data-cu="stat:${key}" data-to="${n}">${n}</b>${tail ? `<span>${tail}</span>` : ''}</span>`;
+  return stat('ready', 'Готовы к поиску', ready.length, `из ${live.length}`) + stat('chunks', 'Фрагментов в индексе', chunks) + stat('cols', 'Коллекций', state.collections.length);
 }
 
 export function docsView({ pickFiles }) {
@@ -140,7 +161,7 @@ export function docsView({ pickFiles }) {
       if (!liveDocs().length) return `<div class="empty-card center dropzone" data-act="pick">
           ${icon('upload', 'lg')}<h2>Добавьте первые документы</h2>
           <p>Перетащите файлы сюда или выберите их на компьютере. Поддерживаются PDF (с текстовым слоем), DOCX, TXT и MD до 15 МБ.</p>
-          <div class="row-actions"><button type="button" class="btn btn-primary" data-act="pick">Выбрать файлы</button><button type="button" class="btn btn-ghost" data-act="demo">Загрузить демо-набор</button></div></div>`;
+          <div class="row-actions"><button type="button" class="btn btn-primary" data-act="pick">Выбрать файлы</button><span class="magnet" data-pad="50" data-k="4"><button type="button" class="btn btn-ghost" data-act="demo">Загрузить демо-набор</button></span></div></div>`;
       return `<div class="empty-card center">${icon('folder', 'lg')}<h2>В коллекции пока пусто</h2><p>Перетащите файлы сюда или переместите документы из других коллекций.</p><button type="button" class="btn btn-primary" data-act="pick">Добавить файлы</button></div>`;
     }
     if (!list.length) {
@@ -175,7 +196,7 @@ export function docsView({ pickFiles }) {
     const errs = current().filter((d) => d.status === 'error');
     const proc = current().filter((d) => d.status === 'queued' || d.status === 'processing');
     let h = '';
-    if (proc.length) h += `<div class="banner info" role="status"><span class="spin" aria-hidden="true"></span>Обрабатывается ${nDocs(proc.length)}. Они станут доступны для поиска автоматически — можно продолжать работу.</div>`;
+    if (proc.length) h += `<div class="banner info" role="status">${lattice({ pattern: 'snake', mini: true })}Обрабатывается ${nDocs(proc.length)}. Они станут доступны для поиска автоматически — можно продолжать работу.</div>`;
     if (errs.length && filter !== 'error') h += `<div class="banner warn">${icon('alert', 'sm')}<span>${errs.length} ${plural(errs.length, 'файл требует', 'файла требуют', 'файлов требуют')} внимания: текст не удалось прочитать.</span><button type="button" class="link-btn" data-act="show-errors">Показать</button></div>`;
     return h;
   }
@@ -206,13 +227,13 @@ export function docsView({ pickFiles }) {
       case 'retry': return retryDocs([id]);
       case 'replace': return pickFiles(null, (f) => replaceFile(id, f), false);
       case 'move': return moveDialog([id]);
-      case 'trash': selected.delete(id); return trashWithUndo([id]);
+      case 'trash': selected.delete(id); toBin([id]); return trashWithUndo([id]);
       case 'restore': restoreDocs([id]); toast('Документ восстановлен.'); return;
       case 'purge': if (await confirmDialog({ title: 'Удалить навсегда?', text: `«${getDoc(id).name}» будет удалён без возможности восстановления. Ссылки на него в ответах станут недоступны.`, ok: 'Удалить навсегда' })) { selected.delete(id); purgeDocs([id]); } return;
       case 'bulk-ask': return askAbout(ids.filter((x) => getDoc(x)?.status === 'ready'));
       case 'bulk-retry': retryDocs(ids); selected.clear(); return;
       case 'bulk-move': if (await moveDialog(ids)) selected.clear(); return render();
-      case 'bulk-trash': trashWithUndo(ids); selected.clear(); return render();
+      case 'bulk-trash': toBin(ids); trashWithUndo(ids); selected.clear(); return render();
       case 'bulk-restore': restoreDocs(ids); toast(`Восстановлено: ${nDocs(ids.length)}.`); selected.clear(); return render();
       case 'bulk-purge': if (await confirmDialog({ title: 'Удалить навсегда?', text: `${nDocs(ids.length)} будут удалены без возможности восстановления.`, ok: 'Удалить навсегда' })) { purgeDocs(ids); selected.clear(); } return render();
       case 'empty-trash': { const all = state.docs.filter((d) => d.deletedAt).map((d) => d.id); if (all.length && await confirmDialog({ title: 'Очистить корзину?', text: `${nDocs(all.length)} будут удалены навсегда.`, ok: 'Очистить' })) purgeDocs(all); return; }
@@ -248,6 +269,8 @@ export function docsView({ pickFiles }) {
     reveal(root.querySelector('#docList'), seen);
     root.querySelector('#docTitle').textContent = isTrash() ? 'Корзина' : c ? c.name : route.col === 'none' ? 'Без коллекции' : 'Все документы';
     root.querySelector('#cols').innerHTML = colsHtml();
+    const st = statsHtml();
+    if (root._stats !== st) { root.querySelector('#stats').innerHTML = st; root._stats = st; }
     root.querySelector('#attention').innerHTML = attentionHtml();
     root.querySelector('#bulk').innerHTML = bulkHtml();
     root.querySelector('#headActions').innerHTML = isTrash()
@@ -263,7 +286,7 @@ export function docsView({ pickFiles }) {
       if (!FILTERS.some((f) => f.id === filter)) filter = 'all';
       main.innerHTML = `<section class="docs-view">
         <header class="view-head">
-          <div><p class="eyebrow">Документы</p><h1 id="docTitle"></h1><p class="sub">Агент отвечает только по документам со статусом «Готов к поиску». Коллекция — это и папка, и область поиска в чате.</p></div>
+          <div><p class="eyebrow">Документы</p><h1 id="docTitle"></h1><p class="sub">Агент отвечает только по документам со статусом «Готов к поиску». Коллекция — это и папка, и область поиска в чате.</p><div class="stats" id="stats"></div></div>
           <div class="head-actions" id="headActions"></div>
         </header>
         <div class="docs-layout">
@@ -284,6 +307,7 @@ export function docsView({ pickFiles }) {
       root.addEventListener('click', onClick);
       root.addEventListener('change', onChange);
       render();
+      prewarm();
     },
     update(r) { if (r) route = r; render(); },
     dropTarget: () => targetCol(),
@@ -292,8 +316,17 @@ export function docsView({ pickFiles }) {
 
 // ---------- Страница документа ----------
 export function docPage() {
-  let root;
+  let root, fb = null, holding = false; // кнопка «В корзину» со шнуром отмены переживает перерисовки страницы
   return {
+    // FuseButton: нажали — документ сразу в корзине, 5 секунд горит шнур «Вернуть». Догорел — обычное состояние корзины.
+    fuse(d) {
+      fb ||= fuseButton({ label: 'В корзину', undoLabel: 'Вернуть', doneLabel: 'В корзине', icon: icon('trash', 'sm'), undoIcon: icon('undo', 'sm'), doneIcon: icon('check', 'sm'),
+        undoWindow: 5000, className: 'fb-ghost',
+        onCommit: () => { holding = true; trashDocs([d.id]); },
+        onUndo: () => { holding = false; restoreDocs([d.id]); },
+        onFuseEnd: () => { holding = false; fb = null; this.update(); toast('Документ в корзине и исключён из поиска.'); } });
+      return fb;
+    },
     mount(main, route) {
       main.innerHTML = '<section class="doc-page" id="docPage"></section>';
       root = main.querySelector('#docPage');
@@ -302,7 +335,6 @@ export function docPage() {
         if (!t) return;
         const d = getDoc(route.id);
         if (t.dataset.act === 'move') moveDialog([d.id]);
-        if (t.dataset.act === 'trash') { trashWithUndo([d.id]); }
         if (t.dataset.act === 'restore') restoreDocs([d.id]);
         if (t.dataset.act === 'ask') askAbout([d.id]);
         if (t.dataset.act === 'retry') retryDocs([d.id]);
@@ -324,7 +356,7 @@ export function docPage() {
       } else if (d.status === 'error') {
         content = `<div class="empty-card">${icon('alert', 'lg')}<h2>Не удалось прочитать файл</h2><p>${esc(d.error)}</p>${demoNote(d)}${canRetry(d) ? `<button type="button" class="btn btn-primary" data-act="retry">${icon('refresh', 'sm')}Повторить обработку</button>` : ''}</div>`;
       } else {
-        content = `<div class="empty-card"><span class="spin lg" aria-hidden="true"></span><h2>Документ обрабатывается</h2><p>${esc(d.stage || 'В очереди')}… Содержимое появится здесь, когда текст будет извлечён.</p></div>`;
+        content = `<div class="empty-card">${lattice({ pattern: 'snake' })}<h2>Документ обрабатывается</h2><p>${esc(d.stage || 'В очереди')}… Содержимое появится здесь, когда текст будет извлечён.</p></div>`;
       }
       const html = `${back}
         <header class="doc-head">
@@ -333,10 +365,10 @@ export function docPage() {
             <div class="doc-facts">${statusBadge(d)}<span>${icon('folder', 'xs')}${esc(colName(d.collectionId))}</span><span>${docMeta(d)}</span>${d.deletedAt ? '<span class="status st-error">В корзине</span>' : ''}</div>
           </div>
           <div class="head-actions">
-            ${d.deletedAt ? `<button type="button" class="btn btn-primary" data-act="restore">${icon('restore', 'sm')}Восстановить</button>`
+            ${d.deletedAt && !holding ? `<button type="button" class="btn btn-primary" data-act="restore">${icon('restore', 'sm')}Восстановить</button>`
               : `${d.status === 'ready' ? `<button type="button" class="btn btn-primary" data-act="ask">${icon('chat', 'sm')}Спросить по документу</button>` : ''}
               <button type="button" class="btn btn-ghost" data-act="move">${icon('move', 'sm')}Переместить</button>
-              <button type="button" class="btn btn-ghost" data-act="trash">${icon('trash', 'sm')}Удалить</button>`}
+              <span data-fuse></span>`}
           </div>
         </header>
         ${d.status === 'ready' ? `<p class="doc-note">${icon('info', 'xs')}Ниже — текст, извлечённый из файла: именно по нему ищет агент. ${d.pages ? 'Номера страниц соответствуют страницам PDF.' : 'В DOCX/TXT нет страниц, поэтому ориентиром служат разделы.'}</p>` : ''}
@@ -344,6 +376,7 @@ export function docPage() {
       if (html !== this.last) {
         root.innerHTML = html;
         this.last = html;
+        root.querySelector('[data-fuse]')?.replaceWith(this.fuse(d));
         if (first && hl) requestAnimationFrame(() => scrollToHit(root));
       }
     },

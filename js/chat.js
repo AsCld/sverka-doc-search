@@ -2,7 +2,8 @@
 
 import { state, chat as getChat, commit, emit, save, createChat, toggleSaved, uid, liveDocs, loadDemo, restoreDocs } from './store.js';
 import { askAI, scopeInfo } from './agent.js';
-import { EXAMPLES } from '../demo/manifest.js';
+import { EXAMPLES, FILES } from '../demo/manifest.js';
+import { lattice, blurWords } from './fx.js';
 import { esc, icon, inline, anchor, plural, nDocs, fmtDate, toast, modal, statusBadge, TYPE, reveal } from './ui.js';
 
 const running = new Map(); // msgId → { cancelled, ctrl }
@@ -18,6 +19,7 @@ const info = (c) => scopeInfo(scopeOf(c), state.docs, state.collections);
 async function runAnswer(c, m) {
   const token = { cancelled: false, ctrl: new AbortController() };
   running.set(m.id, token);
+  m.t0 = Date.now();
   const step = async (i, ms) => { m.step = i; emit(); await pause(ms); return token.cancelled; };
   const idx = c.messages.indexOf(m);
   const question = c.messages[idx - 1].text;
@@ -45,6 +47,7 @@ async function runAnswer(c, m) {
     }
   }
   m.pending = false;
+  m.ms = Date.now() - m.t0;
   delete m.found; delete m.checks;
   running.delete(m.id);
   c.updatedAt = Date.now();
@@ -72,7 +75,7 @@ export function send(chatId, text) {
 }
 
 function retry(c, m) {
-  Object.assign(m, { pending: true, step: 0, error: null, stopped: false, answer: null, found: null, checks: 0 });
+  Object.assign(m, { pending: true, step: 0, error: null, stopped: false, answer: null, found: null, checks: 0, ms: null });
   commit();
   runAnswer(c, m);
 }
@@ -81,7 +84,7 @@ function stop(c, m) {
   const t = running.get(m.id);
   if (t) { t.cancelled = true; t.ctrl.abort(); }
   running.delete(m.id);
-  Object.assign(m, { pending: false, stopped: true });
+  Object.assign(m, { pending: false, stopped: true, ms: Date.now() - (m.t0 || Date.now()) });
   delete m.found; delete m.checks;
   commit();
 }
@@ -133,27 +136,27 @@ function startScreen(c) {
   const ready = all.filter((d) => d.status === 'ready').length;
   const pending = all.filter((d) => d.status === 'queued' || d.status === 'processing').length;
   const step1 = !all.length ? '<span class="step-state warn">нет документов</span>'
-    : `<span class="step-state ${ready ? 'ok' : 'info'}">${ready ? `${icon('check', 'sm')}${nDocs(ready)} готовы к поиску` : ''}${pending ? `${ready ? ' · ' : ''}<span class="spin" aria-hidden="true"></span>${pending} в обработке` : ''}</span>`;
-  const examples = EXAMPLES.map((e, i) => `<button type="button" class="example" style="--i:${i + 7}" data-ask="${esc(e.q)}" ${inf.ready.length ? '' : 'disabled'}>
-      <span class="ex-kind">${esc(e.kind)}</span><span class="ex-q">${esc(e.q)}</span>${icon('send', 'ex-ic')}</button>`).join('');
+    : `<span class="step-state ${ready ? 'ok' : 'info'}">${ready ? `${icon('check', 'sm')}готовы: <b data-cu="ready" data-to="${ready}">${ready}</b> из ${all.length}` : ''}${pending ? `${ready ? ' · ' : ''}${lattice({ pattern: 'snake', mini: true })}${pending} в обработке` : ''}</span>`;
+  const examples = EXAMPLES.map((e, i) => `<button type="button" class="example spot" style="--i:${i + 7}; --hue:${e.hue}" data-ask="${esc(e.q)}" ${inf.ready.length ? '' : 'disabled'}>
+      <span class="ex-tile" aria-hidden="true">${icon(e.icon)}</span><span class="ex-kind">${esc(e.kind)}</span><span class="ex-q">${esc(e.q)}</span>${icon('send', 'ex-ic')}</button>`).join('');
   return `<div class="start" data-k="start">
     <div class="start-hero">
       <div class="hero-copy">
         <span class="hero-eyebrow" style="--i:0"><span class="live-dot" aria-hidden="true"></span>ИИ-агент по рабочим документам</span>
-        <h1 style="--i:1">Найдите ответ в документах и <span class="accent-text">сразу проверьте его по источнику</span></h1>
+        <h1 style="--i:1">${blurWords('Найдите ответ в документах и')} <span class="accent-text">${blurWords('сразу проверьте его по источнику', 5)}</span></h1>
         <p style="--i:2">Сверка ищет по регламентам, протоколам, отчётам и планам. В каждом ответе — точные цитаты и ссылка на страницу или раздел, откуда они взяты.</p>
       </div>
       ${HERO_ART}
     </div>
     <ol class="steps" aria-label="Как начать">
-      <li style="--i:3"><span class="step-n">1</span><div><b>Документы</b>${step1}</div><a class="link-btn" href="#/docs">Открыть</a></li>
-      <li style="--i:4"><span class="step-n">2</span><div><b>Область поиска</b><span class="step-state">${esc(inf.label)}</span></div><button type="button" class="link-btn" data-act="scope">Изменить</button></li>
-      <li style="--i:5"><span class="step-n">3</span><div><b>Вопрос</b><span class="step-state">ответ, цитаты, источник</span></div></li>
+      <li class="spot" style="--i:3"><span class="step-n">1</span><div><b>Документы</b>${step1}</div><a class="link-btn" href="#/docs">Открыть</a></li>
+      <li class="spot" style="--i:4"><span class="step-n">2</span><div><b>Область поиска</b><span class="step-state">${esc(inf.label)}</span></div><button type="button" class="link-btn" data-act="scope">Изменить</button></li>
+      <li class="spot" style="--i:5"><span class="step-n">3</span><div><b>Вопрос</b><span class="step-state">ответ, цитаты, источник</span></div></li>
     </ol>
     ${!all.length ? `<div class="empty-card" style="--i:6">
         <h2>Нет документов для поиска</h2>
-        <p>Загрузите демонстрационный набор — 7 вымышленных документов стройки участка ВСМ (протоколы, отчёт, регламент, план поставок, перечень ответственных и один скан без текста — он нарочно показывает ошибку чтения) — или добавьте свои PDF, DOCX, TXT, MD.</p>
-        <div class="row-actions"><button type="button" class="btn btn-primary" data-act="demo">${icon('upload')}Загрузить демо-набор</button><button type="button" class="btn btn-ghost" data-act="pick">Добавить свои файлы</button></div>
+        <p>Загрузите демонстрационный набор — ${FILES.length} вымышленных документов стройки участка ВСМ: протоколы, отчёты, график, акт и предписание технадзора, протокол испытаний бетона, регламенты, план поставок, письмо поставщика, памятка для подрядчиков и один скан без текста — он нарочно показывает ошибку чтения. Или добавьте свои PDF, DOCX, TXT, MD.</p>
+        <div class="row-actions"><span class="magnet" data-pad="60" data-k="4"><button type="button" class="btn btn-primary" data-act="demo">${icon('upload')}Загрузить демо-набор</button></span><button type="button" class="btn btn-ghost" data-act="pick">Добавить свои файлы</button></div>
       </div>`
       : `<div class="examples-head" style="--i:6"><h2>Примеры вопросов</h2>${inf.ready.length ? '' : '<span class="muted">станут доступны, когда документы будут готовы</span>'}</div><div class="examples">${examples}</div>`}
   </div>`;
@@ -162,7 +165,7 @@ function startScreen(c) {
 function sourceCard(msgId, s, key, attr = '') {
   const d = state.docs.find((x) => x.id === s.docId);
   const gone = !d ? 'Документ удалён — источник недоступен.' : d.deletedAt ? 'Документ в корзине.' : null;
-  return `<li class="src-card ${gone ? 'gone' : ''}" data-src-n="${s.n}" ${attr}>
+  return `<li class="src-card spot ${gone ? 'gone' : ''}" data-src-n="${s.n}" ${attr}>
     <button type="button" class="src-open" data-open="${msgId}:${key}" ${!d ? 'disabled' : ''} aria-label="Открыть источник ${s.n}: ${esc(s.docName)}, ${esc(anchor(s))}">
       <span class="src-n">${s.n}</span>
       <span class="src-meta"><span class="src-doc">${icon('doc', 'sm')}${esc(s.docName)}</span><span class="src-anchor">${esc(anchor(s))}</span></span>
@@ -199,6 +202,7 @@ function answerHtml(c, m) {
       : a.status === 'partial'
         ? `<span class="verdict partial">${icon('alert', 'sm')}Подтверждено частично · ${n} ${plural(n, 'источник', 'источника', 'источников')}</span>`
         : `<span class="verdict ok">${icon('shield', 'sm')}Подтверждено документами · ${n} ${plural(n, 'источник', 'источника', 'источников')}</span>`;
+  const time = m.ms != null ? `<span class="ans-time" title="Время от вопроса до ответа">${lattice({ status: 'done', label: 'Ответ за', ms: m.ms })}</span>` : '';
   const ctx = a.context ? `<span class="ctx-chip" title="Уточняющий вопрос: учтён предыдущий вопрос">↳ с учётом вопроса «${esc(a.context.length > 60 ? a.context.slice(0, 60) + '…' : a.context)}»</span>` : '';
   const words = a.searched?.length ? ` Искомые слова: ${a.searched.map((w) => `«${esc(w)}»`).join(', ')}.` : '';
   const how = a.mode === 'model'
@@ -218,7 +222,7 @@ function answerHtml(c, m) {
     }
   }
   const mode = a.mode === 'model' ? `<span class="ctx-chip">${a.kind === 'answer' ? 'Ответ модели · цитаты сверены' : 'Ответ модели'}</span>` : a.fallback ? `<span class="ctx-chip" title="${esc(a.fallback)}">Без модели — ответ из цитат</span>` : '';
-  return `<div class="ans-head">${head}${mode}${ctx}</div>
+  return `<div class="ans-head">${head}${mode}${ctx}${time}</div>
     <div class="ans-body">${body}</div>
     ${extra}
     ${n ? `<section class="sources" aria-label="Источники" ${nx()}><h4>Источники</h4><ol>${a.sources.map((s) => sourceCard(m.id, s, s.n, nx())).join('')}</ol></section>` : ''}
@@ -236,7 +240,7 @@ function messageHtml(c, m) {
   let body;
   if (m.pending) body = thinkingHtml(c, m);
   else if (m.error || m.stopped) {
-    body = `<div class="ans-error" role="alert">${icon('alert')}<div><b>${m.stopped ? 'Ответ остановлен' : 'Не удалось получить ответ'}</b><span>${esc(m.error || 'Вы остановили формирование ответа.')}</span></div>
+    body = `<div class="ans-error" role="alert">${icon('alert')}<div><b>${m.stopped ? 'Ответ остановлен' : 'Не удалось получить ответ'}</b>${m.ms != null ? lattice({ status: 'error', label: m.stopped ? 'Остановлен через' : 'Сбой через', ms: m.ms }) : ''}<span>${esc(m.error || 'Вы остановили формирование ответа.')}</span></div>
       <button type="button" class="btn btn-sm btn-primary" data-act="retry" data-msg="${m.id}">${icon('refresh', 'sm')}Повторить</button></div>`;
   } else body = answerHtml(c, m);
   const st = m.pending ? 'p' : m.error || m.stopped ? 'e' : 'a';
@@ -254,7 +258,7 @@ function thinkingHtml(c, m) {
     ['Сверяю цитаты с текстом документов', m.step === 2 && m.checks ? `<span class="ticks" data-k="${m.id}:ticks">${Array.from({ length: m.checks }, (_, i) => `<span class="tick" style="--i:${i}">${icon('check', 'xs')}${i + 1}</span>`).join('')}</span>` : ''],
   ];
   return `<div class="thinking" role="status" aria-live="polite">
-    <div class="think-title"><span class="scan" aria-hidden="true"></span>Ищу ответ в ${inDocs(inf.ready.length)} · «${esc(inf.label)}»</div>
+    <div class="think-title">${lattice({ label: `Ищу ответ в ${inDocs(inf.ready.length)} · «${inf.label}»`, t0: m.t0 })}</div>
     <ol class="think-steps">${steps.map(([t, x], i) => `<li class="${i < m.step ? 'done' : i === m.step ? 'now' : ''}">
       <span class="st-ic" ${i < m.step ? `data-k="${m.id}:d${i}"` : ''}>${i < m.step ? icon('check', 'sm') : '<span class="dot"></span>'}</span><div class="st-body"><span>${t}</span>${x}</div></li>`).join('')}</ol>
     <button type="button" class="btn btn-sm btn-ghost" data-act="stop" data-msg="${m.id}">${icon('stop', 'sm')}Остановить</button>

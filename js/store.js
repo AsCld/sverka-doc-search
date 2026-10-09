@@ -116,16 +116,16 @@ async function pump() {
         const file = await sourceFile(d);
         if (!file) throw new ReadError('Исходный файл недоступен после перезагрузки страницы. Загрузите его снова.');
         d.size = file.size;
-        await pause(350);
+        await pause(200);
         d.stage = 'Извлечение текста'; emit();
         const blocks = await extract(file);
-        await pause(300);
+        await pause(150);
         d.stage = 'Индексация'; emit();
         d.blocks = blocks;
         d.pages = new Set(blocks.map((b) => b.n).filter(Boolean)).size;
         d.sections = new Set(blocks.map((b) => b.section).filter(Boolean)).size;
         d.chunks = chunkPages(d.id, blocks).length;
-        await pause(250);
+        await pause(120);
         d.status = 'ready'; d.stage = null; d.readyAt = Date.now();
       } catch (e) {
         d.status = 'error'; d.stage = null;

@@ -1,5 +1,7 @@
 // Общие помощники интерфейса: экранирование, иконки, форматирование, тосты, диалоги.
 
+import { lattice, fuseButton } from './fx.js';
+
 export const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const P = {
@@ -30,6 +32,9 @@ const P = {
   shield: '<path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6Z"/><path d="m9 12 2 2 4-4"/>',
   edit: '<path d="M4 20h4L19 9l-4-4L4 16Z"/>',
   restore: '<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  compare: '<path d="M7 4v16M17 4v16M3 8h8M13 16h8"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2Z"/><path d="M4 19V5M9 7h6"/>',
 };
 export const icon = (name, cls = '') => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[name] || ''}</svg>`;
 
@@ -78,7 +83,7 @@ export const STATUS = {
 export function statusBadge(d) {
   const s = STATUS[d.status];
   const text = d.status === 'processing' && d.stage ? `${s.label}: ${d.stage.toLowerCase()}` : s.label;
-  return `<span class="status ${s.cls}">${d.status === 'processing' ? '<span class="spin" aria-hidden="true"></span>' : '<span class="dot" aria-hidden="true"></span>'}${esc(text)}</span>`;
+  return `<span class="status ${s.cls}">${d.status === 'processing' ? lattice({ pattern: 'snake', mini: true }) : '<span class="dot" aria-hidden="true"></span>'}${esc(text)}</span>`;
 }
 
 // ---------- Анимация появления ----------
@@ -94,14 +99,25 @@ export function reveal(root, seen, animate = () => true) {
 }
 
 // ---------- Тосты ----------
-export function toast(text, { action, onAction, kind = '' } = {}) {
+// undo: true — действие уже выполнено, кнопка «Отменить» горит «шнуром» (FuseButton) — видно, сколько осталось
+// на отмену; наведение ставит шнур на паузу. Уведомление закрывается, когда шнур догорел.
+export function toast(text, { action, onAction, kind = '', undo = false } = {}) {
   const box = document.getElementById('toasts');
   const el = document.createElement('div');
   el.className = `toast ${kind}`;
-  el.innerHTML = `<span>${esc(text)}</span>${action ? `<button type="button" class="btn btn-ghost btn-sm">${esc(action)}</button>` : ''}<button type="button" class="icon-btn btn-sm" aria-label="Закрыть уведомление">${icon('x')}</button>`;
-  const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 200); };
-  if (action) el.querySelector('.btn').onclick = () => { onAction?.(); close(); };
+  el.innerHTML = `<span>${esc(text)}</span>${action && !undo ? `<button type="button" class="btn btn-ghost btn-sm">${esc(action)}</button>` : ''}<button type="button" class="icon-btn btn-sm" aria-label="Закрыть уведомление">${icon('x')}</button>`;
+  let closed = false;
+  const close = () => { if (closed) return; closed = true; el.classList.add('out'); setTimeout(() => el.remove(), 200); };
   el.querySelector('.icon-btn').onclick = close;
+  if (undo) {
+    const fb = fuseButton({ undoLabel: action, undoIcon: icon('undo', 'sm'), undoWindow: 8000, commitOn: 'none', focusUndo: false, className: 'fb-toast',
+      onUndo: () => { onAction?.(); close(); }, onFuseEnd: close });
+    el.querySelector('span').after(fb);
+    box.append(el);
+    fb.fuse.armNow();
+    return;
+  }
+  if (action) el.querySelector('.btn').onclick = () => { onAction?.(); close(); };
   box.append(el);
   setTimeout(close, action ? 8000 : 4500);
 }

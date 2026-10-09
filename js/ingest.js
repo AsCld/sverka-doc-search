@@ -43,6 +43,12 @@ function fromText(text, ext) {
       cur = { n: null, section: h[1].trim(), text: '' };
       continue;
     }
+    // MD: строка таблицы → «ячейка | ячейка» (как таблицы DOCX), пункт списка — отдельный абзац.
+    if (ext === 'md' && /^\|.*\|$/.test(line)) {
+      if (!/^\|[\s:|-]+\|$/.test(line)) cur.text += `\n${line.slice(1, -1).split('|').map((c) => c.trim()).join(' | ')}\n\n`;
+      continue;
+    }
+    if (ext === 'md' && /^([-*]|\d+\.)\s+/.test(line)) { cur.text += `\n${line.replace(/^[-*]\s+/, '')}\n\n`; continue; }
     cur.text += (line ? line : '') + '\n';
   }
   if (cur.text.trim()) blocks.push(cur);
