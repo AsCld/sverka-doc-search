@@ -81,6 +81,18 @@ export function statusBadge(d) {
   return `<span class="status ${s.cls}">${d.status === 'processing' ? '<span class="spin" aria-hidden="true"></span>' : '<span class="dot" aria-hidden="true"></span>'}${esc(text)}</span>`;
 }
 
+// ---------- Анимация появления ----------
+// Виды перерисовываются целиком (innerHTML), поэтому CSS-анимация сама по себе запускалась бы
+// при каждом обновлении. Элемент с data-k получает класс enter только при первом показе ключа.
+export function reveal(root, seen, animate = () => true) {
+  for (const el of root.querySelectorAll('[data-k]')) {
+    const k = el.dataset.k;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (animate(k)) el.classList.add('enter');
+  }
+}
+
 // ---------- Тосты ----------
 export function toast(text, { action, onAction, kind = '' } = {}) {
   const box = document.getElementById('toasts');

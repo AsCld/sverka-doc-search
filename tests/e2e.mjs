@@ -13,7 +13,8 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const srv = await serve();
 const BASE = `http://localhost:${srv.address().port}/`;
 const browser = await chromium.launch(process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {});
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'] });
+// Для скриншотов — «уменьшить движение»: кадры снимаются в итоговом состоянии, а не посреди анимации.
+const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ['clipboard-read', 'clipboard-write'], reducedMotion: SHOTS ? 'reduce' : 'no-preference' });
 // Модель подменяется: по умолчанию функция «недоступна» (503) — проверяется запасной режим без модели.
 // MODEL = (body) => ответ — имитирует Gemini, чтобы проверить сверку цитат без сети и ключа.
 let MODEL = null;
@@ -31,7 +32,7 @@ async function step(name, fn) {
   try { await fn(); console.log(`✓ ${n}. ${name}`); }
   catch (e) { console.log(`✗ ${n}. ${name}\n   ${e.message.split('\n')[0]}`); await page.screenshot({ path: `/tmp/e2e-fail-${n}.png` }); process.exitCode = 1; }
 }
-const shot = async (name, p = page) => SHOTS && p.screenshot({ path: SHOTS + name + '.png' });
+const shot = async (name, p = page) => SHOTS && (await p.waitForTimeout(300), p.screenshot({ path: SHOTS + name + '.png' }));
 const text = (sel) => page.locator(sel).innerText();
 const waitText = (sel, re) => page.waitForFunction(([s, src]) => new RegExp(src).test(document.querySelector(s)?.innerText || ''), [sel, re.source]);
 const lastAnswer = () => page.locator('.msg.agent').last();
@@ -284,7 +285,7 @@ await step('Обновление страницы: данные сохраняю
 });
 
 await step('Узкий экран (390 px): нет горизонтальной прокрутки, источник открывается поверх', async () => {
-  const m = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const m = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, reducedMotion: SHOTS ? 'reduce' : 'no-preference' });
   const data = await page.evaluate(() => localStorage.getItem('sverka.v1'));
   await m.addInitScript((s) => { if (!sessionStorage.getItem('seeded')) { localStorage.setItem('sverka.v1', s); sessionStorage.setItem('seeded', '1'); } }, data);
   await m.goto(firstChat.replace(/\?.*/, ''));

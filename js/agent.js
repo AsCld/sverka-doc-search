@@ -287,7 +287,8 @@ export function verifyModel(res, frags, docs) {
 const plainAnswer = (a) => a.blocks.map((b) => b.text || (b.items || []).map((x) => x.text || x).join('; ')).join(' ');
 const where = (c) => [c.page && `стр. ${c.page}`, c.section].filter(Boolean).join(', ') || 'начало документа';
 
-export async function askAI(params, { signal, fetchFn = fetch } = {}) {
+// onFound({ n, docs }) — сколько фрагментов и из каких документов уйдёт в модель (для экрана «ищу ответ»).
+export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
   const local = ask(params);
   // Нет готовых документов или ответ явно в другой области — модель ничего не добавит.
   if (local.kind === 'noscope' || local.outside) return local;
@@ -296,6 +297,7 @@ export async function askAI(params, { signal, fetchFn = fetch } = {}) {
   const { r, context } = retrieve(question, history, info, docs, MAX_FRAGS);
   if (!r.results.length) return local;
   const frags = r.results.map((x) => x.chunk);
+  onFound?.({ n: frags.length, docs: [...new Set(frags.map((c) => docs.find((d) => d.id === c.docId).name))] });
   const fallback = (why) => ({ ...local, fallback: why });
 
   let res;

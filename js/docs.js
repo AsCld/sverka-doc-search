@@ -2,7 +2,7 @@
 // Также страница одного документа.
 
 import { state, liveDocs, doc as getDoc, collection, retryDocs, canRetry, moveDocs, trashDocs, restoreDocs, purgeDocs, createCollection, renameCollection, deleteCollection, loadDemo, replaceFile, commit } from './store.js';
-import { esc, icon, fmtSize, fmtDate, statusBadge, TYPE, toast, modal, confirmDialog, promptDialog, nDocs, plural } from './ui.js';
+import { esc, icon, fmtSize, fmtDate, statusBadge, TYPE, toast, modal, confirmDialog, promptDialog, nDocs, plural, reveal } from './ui.js';
 import { docBody, scrollToHit } from './viewer.js';
 import { ACCEPT } from './ingest.js';
 
@@ -12,6 +12,10 @@ const FILTERS = [
   { id: 'processing', label: 'В обработке', test: (d) => d.status === 'queued' || d.status === 'processing' },
   { id: 'error', label: 'Ошибки', test: (d) => d.status === 'error' },
 ];
+
+// Скан в демо-наборе положен нарочно — показать состояние «Ошибка чтения». Объясняем это прямо в списке.
+const demoNote = (d) => (d.demoKey === 'scan' && d.status === 'error'
+  ? `<div class="doc-hint">${icon('info', 'xs')}Файл в демо-наборе нарочно: так выглядит ошибка чтения. Остальные документы ищутся как обычно.</div>` : '');
 
 const colName = (id) => (id ? collection(id)?.name || 'Без коллекции' : 'Без коллекции');
 
@@ -76,8 +80,9 @@ function askAbout(ids) {
 }
 
 export function docsView({ pickFiles }) {
-  let root, route, q = '', filter = 'all';
+  let root, route, q = '', filter = 'all', ri = 0;
   const selected = new Set();
+  const seen = new Set(); // строки и статусы, которые уже показаны (см. reveal)
 
   const isTrash = () => route.col === 'trash';
   const current = () => {
@@ -113,20 +118,21 @@ export function docsView({ pickFiles }) {
          ${d.status === 'error' ? (canRetry(d) ? `<button type="button" class="btn btn-sm btn-ghost" data-act="retry" data-id="${d.id}">${icon('refresh', 'sm')}Повторить</button>` : `<button type="button" class="btn btn-sm btn-ghost" data-act="replace" data-id="${d.id}">${icon('upload', 'sm')}Загрузить снова</button>`) : ''}
          <button type="button" class="icon-btn" data-act="move" data-id="${d.id}" aria-label="Переместить ${esc(d.name)}" title="Переместить в коллекцию">${icon('move')}</button>
          <button type="button" class="icon-btn" data-act="trash" data-id="${d.id}" aria-label="Удалить ${esc(d.name)}" title="В корзину">${icon('trash')}</button>`;
-    return `<li class="doc-row ${sel ? 'sel' : ''} ${d.status === 'error' ? 'err' : ''}">
+    return `<li class="doc-row ${sel ? 'sel' : ''} ${d.status === 'error' ? 'err' : ''} ${d.status === 'processing' ? 'proc' : ''}" data-k="${d.id}" style="--i:${Math.min(ri++, 12)}">
       <label class="cb"><input type="checkbox" data-sel="${d.id}" ${sel ? 'checked' : ''} aria-label="Выбрать ${esc(d.name)}"></label>
       <span class="ftype ft-${d.ext}" aria-hidden="true">${TYPE[d.ext] || (d.ext || '?').toUpperCase().slice(0, 4)}</span>
       <div class="doc-main">
         ${isTrash() ? `<span class="doc-name">${esc(d.name)}</span>` : `<a class="doc-name" href="#/doc/${d.id}">${esc(d.name)}</a>`}
         <div class="doc-meta">${showCol ? `${icon('folder', 'xs')}${esc(colName(d.collectionId))} · ` : ''}${isTrash() ? `удалён ${fmtDate(d.deletedAt)}` : docMeta(d)}</div>
-        ${d.status === 'error' ? `<div class="doc-err">${esc(d.error)}</div>` : ''}
+        ${d.status === 'error' ? `<div class="doc-err">${esc(d.error)}</div>${demoNote(d)}` : ''}
       </div>
-      <div class="doc-status">${statusBadge(d)}</div>
+      <div class="doc-status" data-k="${d.id}:${d.status}">${statusBadge(d)}</div>
       <div class="doc-actions">${actions}</div>
     </li>`;
   }
 
   function listHtml() {
+    ri = 0;
     const all = current();
     const list = visible();
     if (!all.length) {
@@ -239,6 +245,7 @@ export function docsView({ pickFiles }) {
     if (route.col && !['all', 'none', 'trash'].includes(route.col) && !c) {
       root.querySelector('#docList').innerHTML = `<div class="empty-card center"><h2>Коллекция не найдена</h2><p>Возможно, она была удалена.</p><a class="btn btn-primary" href="#/docs">Все документы</a></div>`;
     } else root.querySelector('#docList').innerHTML = listHtml();
+    reveal(root.querySelector('#docList'), seen);
     root.querySelector('#docTitle').textContent = isTrash() ? 'Корзина' : c ? c.name : route.col === 'none' ? 'Без коллекции' : 'Все документы';
     root.querySelector('#cols').innerHTML = colsHtml();
     root.querySelector('#attention').innerHTML = attentionHtml();
@@ -315,7 +322,7 @@ export function docPage() {
         const body = docBody(d, hl);
         content = `${hl && !body.found ? `<div class="banner warn">${icon('alert', 'sm')}Цитата не найдена в текущем тексте документа.</div>` : ''}<article class="doc-text">${body.html}</article>`;
       } else if (d.status === 'error') {
-        content = `<div class="empty-card">${icon('alert', 'lg')}<h2>Не удалось прочитать файл</h2><p>${esc(d.error)}</p>${canRetry(d) ? `<button type="button" class="btn btn-primary" data-act="retry">${icon('refresh', 'sm')}Повторить обработку</button>` : ''}</div>`;
+        content = `<div class="empty-card">${icon('alert', 'lg')}<h2>Не удалось прочитать файл</h2><p>${esc(d.error)}</p>${demoNote(d)}${canRetry(d) ? `<button type="button" class="btn btn-primary" data-act="retry">${icon('refresh', 'sm')}Повторить обработку</button>` : ''}</div>`;
       } else {
         content = `<div class="empty-card"><span class="spin lg" aria-hidden="true"></span><h2>Документ обрабатывается</h2><p>${esc(d.stage || 'В очереди')}… Содержимое появится здесь, когда текст будет извлечён.</p></div>`;
       }
