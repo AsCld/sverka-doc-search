@@ -298,8 +298,11 @@ export async function askAI(params, { signal, fetchFn = fetch } = {}) {
 
   let res;
   try {
+    // Ждём модель не дольше 45 с: дальше ответ поиска полезнее, чем спиннер.
+    const timeout = AbortSignal.timeout(45000);
     const resp = await fetchFn(API_URL, {
-      method: 'POST', signal, headers: { 'content-type': 'application/json' },
+      method: 'POST', signal: signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal || timeout,
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         question,
         history: history.flatMap((m, i) => (m.role === 'user' && history[i + 1]?.answer ? [{ q: m.text, a: plainAnswer(history[i + 1].answer) }] : [])).slice(-2),
@@ -309,8 +312,8 @@ export async function askAI(params, { signal, fetchFn = fetch } = {}) {
     res = resp.ok ? await resp.json() : null;
     if (!res) return fallback(resp.status === 429 ? 'исчерпан лимит запросов к модели' : 'модель не ответила');
   } catch (e) {
-    if (e.name === 'AbortError') throw e;
-    return fallback('модель недоступна');
+    if (e.name === 'AbortError') throw e; // остановил пользователь
+    return fallback(e.name === 'TimeoutError' ? 'модель не ответила за 45 с' : 'модель недоступна');
   }
 
   const meta = { mode: 'model', model: res.model, sent: frags.length, context };

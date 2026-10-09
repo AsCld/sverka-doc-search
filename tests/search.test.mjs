@@ -111,3 +111,11 @@ test('дата из названия документа и «28» из 28.09.202
   assert.equal(none.kind, 'answer');
   assert.match(none.fallback, /не нашла/);
 });
+
+test('функция модели отрезает протёкший в ответ JSON и достаёт из него цитаты', async () => {
+  const { repair } = await import('../api/ask.js');
+  const r = repair({ status: 'answer', answer: 'Срок — **20.10.2026** [1].",\n  "quotes": [\n {\n "n": 1,\n "quote": "Срок — 20.10.2026"\n }, {"n": 2, "quote": "обры', quotes: [] });
+  assert.equal(r.answer, 'Срок — **20.10.2026** [1].');
+  assert.deepEqual(r.quotes, [{ n: 1, quote: 'Срок — 20.10.2026' }]);
+  assert.equal(repair({ answer: 'Обычный ответ [1].' }).answer, 'Обычный ответ [1].');
+});

@@ -47,6 +47,17 @@ const ANSWER_FN = {
 
 const s = (v, max) => String(v ?? '').slice(0, max);
 
+// GigaChat иногда «протекает»: дописывает остаток JSON (quotes, status…) внутрь строки answer.
+// Отрезаем протечку и, если массив quotes пуст, достаём цитаты из неё. Факты не трогаем — их сверяет браузер.
+export function repair(out) {
+  const a = String(out.answer ?? '');
+  const leak = a.search(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*:/);
+  if (leak < 0) return out;
+  const quotes = [...a.slice(leak).matchAll(/"?n"?\s*:\s*(\d+)\s*,\s*"?quote"?\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
+    .map((m) => ({ n: +m[1], quote: m[2].replace(/\\"/g, '"') }));
+  return { ...out, answer: a.slice(0, leak), quotes: out.quotes?.length ? out.quotes : quotes };
+}
+
 function post(url, headers, body) {
   return new Promise((resolve, reject) => {
     const req = https.request(url, { method: 'POST', headers, agent, timeout: 50000 }, (res) => {
@@ -110,6 +121,7 @@ export default async function handler(req, res) {
       messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }],
       functions: [ANSWER_FN],
       function_call: { name: 'answer' },
+      max_tokens: 1000, // ответы короткие; без предела модель иногда «зацикливается» и пишет минуту
     });
     if (r.status !== 200) {
       return res.status(r.status === 429 ? 429 : 502).json({ error: r.status === 429 ? 'rate_limit' : 'model_error', detail: s(r.json.message, 300) });
@@ -117,7 +129,7 @@ export default async function handler(req, res) {
     const msg = r.json.choices?.[0]?.message || {};
     let out = msg.function_call?.arguments ?? msg.content;
     if (typeof out === 'string') out = JSON.parse(out.replace(/^```(?:json)?\s*|\s*```$/g, ''));
-    return res.status(200).json({ ...out, model: MODEL });
+    return res.status(200).json({ ...repair(out), model: MODEL });
   } catch (e) {
     return res.status(502).json({ error: 'model_error', detail: s(e.message, 300) });
   }
