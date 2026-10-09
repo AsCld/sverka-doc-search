@@ -93,3 +93,21 @@ test('модель недоступна или цитата не сверила�
   assert.equal(fake.mode, 'extractive');
   assert.match(fake.fallback, /сверку/);
 });
+
+test('модель не дала цитату — подтверждаем ссылку предложением фрагмента; выдуманное число — отказ', async () => {
+  const noQuote = await askAI(q, { fetchFn: reply({ status: 'answer', answer: 'В ремонте **7** единиц техники [1].",\n  ', quotes: [] }) });
+  assert.equal(noQuote.mode, 'model');
+  assert.equal(noQuote.sources[0].quote, 'Техника: 96 единиц, из них 7 в ремонте.');
+  assert.equal(noQuote.blocks.at(-1).text, 'В ремонте **7** единиц техники [1].');
+  const wrongNum = await askAI(q, { fetchFn: reply({ status: 'answer', answer: 'В ремонте 9 единиц техники [1].', quotes: [{ n: 1, quote: 'из них 7 в ремонте' }] }) });
+  assert.match(wrongNum.fallback, /число «9»/);
+});
+
+test('дата из названия документа и «28» из 28.09.2026 не считаются выдумкой; «нет ответа» модели не перекрывает найденное', async () => {
+  const d = [{ ...docs[0], name: 'Протокол_№39_от_28.09.2026.docx' }, docs[1], docs[2]];
+  const a = await askAI({ ...q, docs: d }, { fetchFn: reply({ status: 'answer', answer: 'По протоколу от 28 сентября в ремонте 7 единиц [1].', quotes: [{ n: 1, quote: 'из них 7 в ремонте' }] }) });
+  assert.equal(a.mode, 'model');
+  const none = await askAI(q, { fetchFn: reply({ status: 'none', answer: 'Нет информации [1], [2].",' }) });
+  assert.equal(none.kind, 'answer');
+  assert.match(none.fallback, /не нашла/);
+});

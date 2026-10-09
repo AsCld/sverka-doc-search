@@ -2,7 +2,7 @@
 // Без DOM — тестируется в Node. Если модель недоступна или ответ не прошёл сверку, работает
 // запасной режим без модели: подготовленный ответ на демо-вопрос (цитаты сверяются с текстом) или дословные цитаты.
 
-import { buildIndex, chunkPages, search, bestSentences, tokens, normalize, stem, idf } from './search.js';
+import { buildIndex, chunkPages, search, bestSentences, sentences, tokens, normalize, stem, idf } from './search.js';
 import { CURATED } from '../demo/manifest.js';
 
 const MIN_COVERAGE = 0.5;   // ниже — «нет в документах»
@@ -240,16 +240,43 @@ function toBlocks(text) {
   return out;
 }
 
-// Каждая ссылка [n] ответа должна опираться на дословную цитату из фрагмента n. Нет — ответ отклоняется.
+// Сверка ответа модели с документами. Для каждой ссылки [n]:
+// 1) цитата модели должна найтись во фрагменте n дословно (без учёта регистра и пунктуации);
+// 2) если модель цитату не дала или исказила — берём предложение фрагмента, в котором есть
+//    не меньше половины слов утверждения; иначе ссылка не подтверждена.
+// Плюс каждое число и дата из утверждения должны встречаться в цитируемых фрагментах —
+// так ловится самая частая выдумка модели. Не прошла хоть одна проверка — ответ отклоняется.
 export function verifyModel(res, frags, docs) {
-  const text = String(res.answer || '').replace(/\[(\d+(?:\s*,\s*\d+)+)\]/g, (_, l) => l.split(/\s*,\s*/).map((n) => `[${n}]`).join(''));
+  const text = String(res.answer || '').trim().replace(/["\s,]+$/, '') // хвост JSON, который иногда оставляет модель
+    .replace(/\]\s*,\s*\[/g, '][')
+    .replace(/\[(\d+(?:\s*,\s*\d+)+)\]/g, (_, l) => l.split(/\s*,\s*/).map((n) => `[${n}]`).join(''));
   const cited = [...new Set([...text.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]))];
   if (!cited.length) return { failed: 'в ответе нет ссылок на фрагменты' };
+  if (cited.some((n) => !frags[n - 1])) return { failed: 'ссылка на несуществующий фрагмент' };
+
+  const claims = new Map(); // n → текст утверждений, которые на него ссылаются
+  for (const sent of text.split('\n').flatMap((l) => sentences(l))) {
+    const ns = [...sent.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]);
+    if (!ns.length) continue;
+    const claim = sent.replace(/\[\d+\]|\*\*/g, ' ');
+    // Числа источников: текст фрагментов и названия документов; дата 28.09.2026 засчитывает и «28».
+    const inSources = new Set(ns.flatMap((n) => tokens(`${frags[n - 1].text} ${docs.find((d) => d.id === frags[n - 1].docId)?.name || ''}`))
+      .flatMap((t) => (/^\d/.test(t) ? [t, ...t.split(/[.,]/).map((x) => x.replace(/^0+(?=\d)/, ''))] : [])));
+    const num = tokens(claim).find((t) => /^\d/.test(t) && !inSources.has(t) && !inSources.has(t.replace(/^0+(?=\d)/, '')));
+    if (num) return { failed: `число «${num}» не найдено в источниках ${ns.map((n) => `[${n}]`).join('')}` };
+    for (const n of ns) claims.set(n, `${claims.get(n) || ''} ${claim}`);
+  }
+
   const sources = [];
   for (const n of cited) {
     const chunk = frags[n - 1];
-    const quote = chunk && (res.quotes || []).filter((q) => q.n === n).map((q) => findQuote(chunk.text, q.quote)).find(Boolean);
-    if (!quote) return { failed: `цитата для ссылки [${n}] не найдена в документе` };
+    let quote = (res.quotes || []).filter((q) => q.n === n).map((q) => findQuote(chunk.text, q.quote)).find(Boolean);
+    if (!quote) {
+      const want = new Set(tokens(claims.get(n) || ''));
+      const best = sentences(chunk.text).map((x) => ({ x, k: tokens(x).filter((t) => want.has(t)).length })).sort((a, b) => b.k - a.k)[0];
+      if (best && want.size && best.k / want.size >= 0.5) quote = best.x;
+    }
+    if (!quote) return { failed: `ссылка [${n}] не подтверждается текстом фрагмента` };
     sources.push(sourceFromChunk(sources.length + 1, chunk, docs, quote));
   }
   return { sources, blocks: toBlocks(text.replace(/\[(\d+)\]/g, (_, n) => `[${cited.indexOf(+n) + 1}]`)) };
@@ -288,9 +315,11 @@ export async function askAI(params, { signal, fetchFn = fetch } = {}) {
 
   const meta = { mode: 'model', model: res.model, sent: frags.length, context };
   if (res.status === 'none') {
+    // Модель не нашла ответа во фрагментах, а поиск нашёл (например, подготовленный ответ с проверенными цитатами) — показываем его.
+    if (local.kind === 'answer') return fallback('модель не нашла ответа во фрагментах — показан ответ поиска');
     return {
       ...local, ...meta, kind: 'noinfo', status: 'none', outside: null, suggest: [], sources: [],
-      blocks: [{ t: 'p', text: String(res.answer || 'В документах области нет ответа на этот вопрос.').replace(/\s*\[\d+\]/g, '') }],
+      blocks: [{ t: 'p', text: String(res.answer || 'В документах области нет ответа на этот вопрос.').replace(/[\s,]*\[\d+\]/g, '').trim().replace(/["\s,]+$/, '') }],
       near: local.near || local.sources.slice(0, 2).map((s, i) => ({ ...s, n: i + 1 })),
     };
   }
