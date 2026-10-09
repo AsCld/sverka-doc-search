@@ -1,0 +1,27 @@
+<!doctype html><meta charset="utf-8"><title>harness</title>
+<script type="module">
+import { extract } from '../js/ingest.js';
+import { ask } from '../js/agent.js';
+import { FILES } from '../demo/manifest.js';
+window.run = async (questions) => {
+  const docs = [];
+  for (const f of FILES) {
+    const blob = await (await fetch('../demo/' + encodeURIComponent(f.file))).blob();
+    const file = new File([blob], f.file);
+    try { docs.push({ id: f.key, name: f.file, demoKey: f.key, status: 'ready', collectionId: f.col, blocks: await extract(file) }); }
+    catch (e) { docs.push({ id: f.key, name: f.file, status: 'error', error: e.message, blocks: [] }); }
+  }
+  const out = { docs: docs.map(d => ({ name: d.name, status: d.status, error: d.error, blocks: d.blocks })), answers: [] };
+  const history = [];
+  for (const q of questions) {
+    if (q === '---') { history.length = 0; continue; }
+    const scope = typeof q === 'object' ? q.scope : { type: 'all' };
+    const text = typeof q === 'object' ? q.q : q;
+    const a = ask({ question: text, history, scope, docs, collections: [{ id: 'supply', name: 'Снабжение' }, { id: 'site', name: 'Участок' }, { id: 'norms', name: 'Нормативные' }] });
+    history.push({ role: 'user', text }, { role: 'assistant', answer: a });
+    out.answers.push({ q: text, kind: a.kind, status: a.status, mode: a.mode, curatedId: a.curatedId, context: a.context, blocks: a.blocks, sources: a.sources?.map(s => `${s.docName} | стр.${s.page} | ${s.section} | ${s.quote}`), outside: a.outside, near: a.near?.map(s => s.quote) });
+  }
+  return out;
+};
+window.ready = true;
+</script>

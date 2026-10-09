@@ -1,0 +1,14 @@
+{
+  "name": "sverka-doc-agent",
+  "private": true,
+  "type": "module",
+  "description": "Прототип ИИ-агента поиска по документам. Сборка не нужна — это только скрипты проверки.",
+  "scripts": {
+    "start": "node tests/serve.mjs 8080",
+    "test": "node --test tests/search.test.mjs",
+    "test:e2e": "node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  }
+}

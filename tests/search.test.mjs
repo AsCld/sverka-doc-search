@@ -1,0 +1,95 @@
+// Модульные проверки поиска и агента без браузера: node --test tests/
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { stem, sentences, chunkPages, buildIndex, search } from '../js/search.js';
+import { ask, askAI, findQuote, scopeInfo } from '../js/agent.js';
+
+test('стемминг сводит формы слова к одной основе', () => {
+  assert.equal(stem('бетонирования'), stem('бетонирование'));
+  assert.equal(stem('поставки'), stem('поставка'));
+  assert.equal(stem('Тьма'), stem('Тьму'));
+});
+
+test('предложения не режутся на сокращениях «р.» и инициалах', () => {
+  assert.deepEqual(sentences('Мост через р. Тьма готов. Ковалёв А.С. доложил.'), ['Мост через р. Тьма готов.', 'Ковалёв А.С. доложил.']);
+});
+
+const docs = [
+  { id: 'a', name: 'Отчёт.pdf', status: 'ready', collectionId: 'c1', blocks: [
+    { n: 1, section: '1. Ресурсы', text: 'Численность персонала — 412 человек.\nТехника: 96 единиц, из них 7 в ремонте.' },
+    { n: 2, section: '2. Риски', text: 'Похолодание: температура ниже +5 °C ограничит бетонные работы.' },
+  ] },
+  { id: 'b', name: 'Регламент.docx', status: 'ready', collectionId: 'c2', blocks: [
+    { n: null, section: 'Уведомления', text: 'Технадзор уведомляют не позднее чем за 3 рабочих дня.' },
+  ] },
+  { id: 'c', name: 'Скан.pdf', status: 'error', collectionId: 'c1', blocks: [] },
+];
+const cols = [{ id: 'c1', name: 'Участок' }, { id: 'c2', name: 'Нормативы' }];
+
+test('BM25 находит нужный фрагмент и возвращает страницу и раздел', () => {
+  const idx = buildIndex(docs.flatMap((d) => chunkPages(d.id, d.blocks)));
+  const r = search(idx, 'сколько техники в ремонте');
+  assert.equal(r.results[0].chunk.page, 1);
+  assert.equal(r.results[0].chunk.section, '1. Ресурсы');
+  assert.ok(r.coverage >= 0.75);
+});
+
+test('ответ из цитат с источником', () => {
+  const a = ask({ question: 'Сколько техники в ремонте?', scope: { type: 'all' }, docs, collections: cols });
+  assert.equal(a.kind, 'answer');
+  assert.equal(a.sources[0].docName, 'Отчёт.pdf');
+  assert.match(a.sources[0].quote, /7 в ремонте/);
+});
+
+test('слова, которого нет в документах, — явное «нет информации»', () => {
+  const a = ask({ question: 'Какой бюджет участка?', scope: { type: 'all' }, docs, collections: cols });
+  assert.equal(a.kind, 'noinfo');
+  assert.equal(a.sources.length, 0);
+});
+
+test('область поиска ограничивает ответ и подсказывает, где искать', () => {
+  const a = ask({ question: 'За сколько дней уведомляют технадзор?', scope: { type: 'collection', id: 'c1' }, docs, collections: cols });
+  assert.equal(a.kind, 'noinfo');
+  assert.deepEqual(a.outside.names, ['Регламент.docx']);
+});
+
+test('уточняющий вопрос использует контекст предыдущего', () => {
+  const first = { role: 'user', text: 'Какие риски по бетонным работам?' };
+  const a = ask({ question: 'А при какой температуре это?', history: [first, { role: 'assistant', answer: {} }], scope: { type: 'all' }, docs, collections: cols });
+  assert.equal(a.kind, 'answer');
+  assert.equal(a.context, first.text);
+  assert.match(a.sources[0].quote, /\+5 °C/);
+});
+
+test('документы с ошибкой не участвуют в поиске; пустая область распознаётся', () => {
+  const inf = scopeInfo({ type: 'docs', ids: ['c'] }, docs, cols);
+  assert.equal(inf.ready.length, 0);
+  assert.equal(ask({ question: 'что угодно', scope: { type: 'docs', ids: ['c'] }, docs, collections: cols }).kind, 'noscope');
+});
+
+test('цитата модели находится в тексте без учёта регистра и пунктуации; выдуманная — нет', () => {
+  const t = 'Техника: 96 единиц, из них 7 в ремонте.';
+  assert.equal(findQuote(t, 'техника — 96 единиц из них 7 в ремонте'), 'Техника: 96 единиц, из них 7 в ремонте');
+  assert.equal(findQuote(t, 'Техника: 96 единиц, из них 9 в ремонте.'), null);
+});
+
+const reply = (body, status = 200) => async () => ({ ok: status === 200, status, json: async () => body });
+const q = { question: 'Сколько техники в ремонте?', scope: { type: 'all' }, docs, collections: cols };
+
+test('ответ модели: ссылки перенумерованы, источник — точная цитата документа', async () => {
+  const a = await askAI(q, { fetchFn: reply({ status: 'answer', answer: 'В ремонте **7** единиц [1].', quotes: [{ n: 1, quote: 'из них 7 в ремонте' }], model: 'm' }) });
+  assert.equal(a.mode, 'model');
+  assert.equal(a.status, 'confirmed');
+  assert.equal(a.sources.length, 1);
+  assert.equal(a.sources[0].quote, 'из них 7 в ремонте');
+  assert.equal(a.sources[0].page, 1);
+});
+
+test('модель недоступна или цитата не сверилась — запасной режим из цитат', async () => {
+  const down = await askAI(q, { fetchFn: reply({ error: 'rate_limit' }, 429) });
+  assert.equal(down.mode, 'extractive');
+  assert.match(down.fallback, /лимит/);
+  const fake = await askAI(q, { fetchFn: reply({ status: 'answer', answer: 'В ремонте 100 единиц [1].', quotes: [{ n: 1, quote: 'в ремонте 100 единиц техники' }] }) });
+  assert.equal(fake.mode, 'extractive');
+  assert.match(fake.fallback, /сверку/);
+});

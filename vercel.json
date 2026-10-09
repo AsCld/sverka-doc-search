@@ -1,0 +1,4 @@
+{
+  "installCommand": "echo 'функции не нужны зависимости, playwright только для тестов'",
+  "regions": ["fra1"]
+}

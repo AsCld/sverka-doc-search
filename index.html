@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Сверка — поиск по документам</title>
+  <meta name="description" content="Прототип ИИ-агента для поиска по документам: ответ с цитатами и проверкой по источнику.">
+  <meta name="theme-color" content="#f5f6f8">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Перейти к содержимому</a>
+  <div class="app">
+    <aside class="sidebar" id="sidebar" aria-label="Навигация"></aside>
+    <div class="scrim" id="scrim" hidden></div>
+    <div class="main-col">
+      <header class="topbar">
+        <button type="button" class="icon-btn" id="menuBtn" aria-label="Открыть меню"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <a href="#/" class="brand-link"><span class="logo-mark" aria-hidden="true"></span><span class="brand-name">Сверка</span></a>
+        <a href="#/" class="icon-btn" aria-label="Новый диалог"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></a>
+      </header>
+      <p class="storage-err" id="storageErr" role="alert" hidden></p>
+      <main id="main" tabindex="-1">
+        <noscript><p class="page-pad">Для работы прототипа включите JavaScript.</p></noscript>
+      </main>
+    </div>
+    <aside class="panel" id="panel" aria-label="Источник ответа" hidden></aside>
+  </div>
+  <div class="drop-overlay" id="drop" hidden>
+    <div class="drop-box"><svg class="ic lg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+      <b>Отпустите файлы, чтобы добавить</b><span data-target></span><small>PDF, DOCX, TXT, MD · до 15 МБ</small></div>
+  </div>
+  <input type="file" id="filePick" hidden>
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+</body>
+</html>
