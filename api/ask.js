@@ -50,9 +50,9 @@ const s = (v, max) => String(v ?? '').slice(0, max);
 // GigaChat иногда «протекает»: дописывает остаток JSON (quotes, status…) внутрь строки answer.
 // Отрезаем протечку и, если массив quotes пуст, достаём цитаты из неё. Факты не трогаем — их сверяет браузер.
 export function repair(out) {
-  const a = String(out.answer ?? '');
-  const leak = a.search(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*:/);
-  if (leak < 0) return out;
+  const a = String(out.answer ?? '').replace(/\\n/g, '\n'); // иногда переводы строк экранированы дважды
+  const leak = a.search(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*[:=[]/);
+  if (leak < 0) return { ...out, answer: a };
   const quotes = [...a.slice(leak).matchAll(/"?n"?\s*:\s*(\d+)\s*,\s*"?quote"?\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
     .map((m) => ({ n: +m[1], quote: m[2].replace(/\\"/g, '"') }));
   return { ...out, answer: a.slice(0, leak), quotes: out.quotes?.length ? out.quotes : quotes };

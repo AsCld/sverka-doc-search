@@ -247,7 +247,9 @@ function toBlocks(text) {
 // Плюс каждое число и дата из утверждения должны встречаться в цитируемых фрагментах —
 // так ловится самая частая выдумка модели. Не прошла хоть одна проверка — ответ отклоняется.
 export function verifyModel(res, frags, docs) {
-  const text = String(res.answer || '').trim().replace(/["\s,]+$/, '') // хвост JSON, который иногда оставляет модель
+  const text = String(res.answer || '').replace(/\\n/g, '\n') // модель иногда экранирует переводы строк дважды
+    .replace(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*[:=[][\s\S]*$/, '') // протёкший в текст JSON
+    .trim().replace(/["\s,]+$/, '') // хвост JSON, который иногда оставляет модель
     .replace(/\]\s*,\s*\[/g, '][')
     .replace(/\[(\d+(?:\s*,\s*\d+)+)\]/g, (_, l) => l.split(/\s*,\s*/).map((n) => `[${n}]`).join(''));
   const cited = [...new Set([...text.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]))];

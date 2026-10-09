@@ -118,4 +118,6 @@ test('функция модели отрезает протёкший в отв�
   assert.equal(r.answer, 'Срок — **20.10.2026** [1].');
   assert.deepEqual(r.quotes, [{ n: 1, quote: 'Срок — 20.10.2026' }]);
   assert.equal(repair({ answer: 'Обычный ответ [1].' }).answer, 'Обычный ответ [1].');
+  assert.equal(repair({ answer: 'Риски:\\n- первый [1]' }).answer, 'Риски:\n- первый [1]');
+  assert.equal(repair({ answer: 'Срок — 20.10.2026 [1][2].\n\nquotes [\n{' }).answer, 'Срок — 20.10.2026 [1][2].');
 });

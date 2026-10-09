@@ -188,7 +188,7 @@ function answerHtml(c, m) {
       extra += `<section class="sources near" aria-label="Ближайшие фрагменты"><h4>Ближайшие фрагменты — напрямую на вопрос не отвечают</h4><ol>${a.near.map((s) => sourceCard(m.id, s, `near-${s.n}`)).join('')}</ol></section>`;
     }
   }
-  const mode = a.mode === 'model' ? '<span class="ctx-chip">Ответ модели · цитаты сверены</span>' : a.fallback ? `<span class="ctx-chip" title="${esc(a.fallback)}">Без модели — ответ из цитат</span>` : '';
+  const mode = a.mode === 'model' ? `<span class="ctx-chip">${a.kind === 'answer' ? 'Ответ модели · цитаты сверены' : 'Ответ модели'}</span>` : a.fallback ? `<span class="ctx-chip" title="${esc(a.fallback)}">Без модели — ответ из цитат</span>` : '';
   return `<div class="ans-head">${head}${mode}${ctx}</div>
     <div class="ans-body">${blocksHtml(a.blocks, m.id)}</div>
     ${extra}
