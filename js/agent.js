@@ -14,7 +14,7 @@ export function scopeInfo(scope, docs, collections) {
   if (scope?.type === 'collection') {
     const c = collections.find((x) => x.id === scope.id);
     inScope = live.filter((d) => d.collectionId === scope.id);
-    label = c ? c.name : 'Удалённая коллекция';
+    label = c ? c.name : 'Удалённая папка';
   } else if (scope?.type === 'docs') {
     inScope = live.filter((d) => scope.ids.includes(d.id));
     label = inScope.length === 1 ? inScope[0].name : `Выбрано документов: ${inScope.length}`;

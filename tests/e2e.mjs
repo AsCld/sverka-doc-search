@@ -107,7 +107,7 @@ await step('Расширение области и ответ с источни�
   assert.match(a, /Подтверждено документами/);
   assert.match(a, /20\.10\.2026/);
   assert.equal(await lastAnswer().locator('.src-card').count(), 3);
-  assert.match(await text('.msg.system'), /Область поиска изменена: Все документы/);
+  assert.match(await text('.msg.system'), /Теперь ищу в: Все документы/);
   await shot('05-answer');
 });
 
@@ -155,14 +155,14 @@ await step('Ответ модели: цитаты сверяются с доку
   MODEL = (b) => ({ status: 'answer', answer: 'В ремонте **7 единиц** техники [1].', quotes: [{ n: 1, quote: sentence(b) }], suggest: ['Сколько всего техники на участке?'], model: 'test-model' });
   await ask('Сколько единиц техники в ремонте?');
   let a = await lastAnswer().innerText();
-  assert.match(a, /Ответ модели · цитаты сверены/);
+  assert.match(a, /Ответ ИИ · цитаты сверены/);
   assert.match(a, /Подтверждено документами · 1 источник/);
   assert.match(await lastAnswer().locator('.src-quote').innerText(), /ремонте/);
   assert.ok(await lastAnswer().locator('.suggest .chip').isVisible());
   MODEL = () => ({ status: 'answer', answer: 'В ремонте 100 единиц техники [1].', quotes: [{ n: 1, quote: 'В ремонте находится 100 единиц техники.' }], model: 'test-model' });
   await ask('Сколько единиц техники в ремонте?');
   a = await lastAnswer().innerText();
-  assert.match(a, /Без модели — ответ из цитат/);
+  assert.match(a, /Без ИИ — ответ собран из цитат/);
   assert.match(a, /7 единиц в ремонте/);
   assert.doesNotMatch(a, /100 единиц/);
   MODEL = null;

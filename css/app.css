@@ -82,6 +82,13 @@ body.contractor .staff-only { display: none !important; }
 .btn-danger-ghost { background: none; color: var(--err); border-color: transparent; margin-right: auto; }
 .btn-danger-ghost:hover { background: var(--err-soft); }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
+/* Цвет кнопки = смысл действия: красный — удалить, зелёный — вернуть, янтарный — исправить ошибку. */
+.btn-del { background: var(--err-soft); border-color: #f2c4bf; color: var(--err); }
+.btn-del:hover { background: #fbdcd8; border-color: #e9a29a; }
+.btn-ok { background: var(--ok-soft); border-color: #b9e0ca; color: var(--ok); }
+.btn-ok:hover { background: #d5eee0; border-color: #95cfae; }
+.btn-warn { background: var(--warn-soft); border-color: #efd3a1; color: var(--warn); }
+.btn-warn:hover { background: #fbe8c6; border-color: #e3bb73; }
 .icon-btn { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; border: 0; background: none; color: var(--muted); cursor: pointer; text-decoration: none; transition: background .15s, color .15s, transform .2s var(--ease); }
 .icon-btn.btn-sm { width: 30px; height: 30px; border-radius: 9px; }
 .icon-btn:hover { background: rgba(20, 26, 50, .06); color: var(--ink); }
@@ -144,9 +151,15 @@ main:focus-visible, .panel-body:focus-visible { outline: none; }
 .tb-logo { display: grid; place-items: center; width: 40px; height: 40px; }
 .tb-title { flex: 1; min-width: 0; font-size: 17px; font-weight: 700; letter-spacing: -.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .detail .tb-title { font-size: 15.5px; font-weight: 650; }
-.ava-btn { display: grid; place-items: center; width: 36px; height: 36px; margin: 0 4px; border-radius: 50%; border: 0; background: var(--navy); color: #fff; font-weight: 750; font-size: 14px; cursor: pointer; box-shadow: 0 0 0 3px #fff, 0 4px 12px -4px rgba(29, 36, 65, .5); transition: transform .25s var(--spring), background .3s; }
-.ava-btn.ext { background: var(--ext); color: var(--ext-ink); }
-.ava-btn:active { transform: scale(.9); }
+/* Роль в шапке — подписанная «таблетка» со стрелкой: видно, кто ты сейчас и что это можно сменить. */
+.role-chip { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 4px; margin-right: 4px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font-size: 13.5px; font-weight: 650; cursor: pointer; box-shadow: var(--shadow); transition: transform .25s var(--spring), border-color .2s, background .3s; }
+.role-chip .rc-ava { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--navy); color: #fff; font-size: 13px; font-weight: 750; transition: background .3s; }
+.role-chip .ic { margin-left: -4px; color: var(--muted); }
+.role-chip.ext { border-color: #efc88c; background: var(--ext-soft); }
+.role-chip.ext .rc-ava { background: var(--ext); color: var(--ext-ink); }
+.role-chip:hover { border-color: var(--accent); }
+.role-chip:active { transform: scale(.95); }
+@media (max-width: 340px) { .role-chip .rc-name { display: none; } }
 .logo-mark { display: block; width: 30px; height: 30px; border-radius: 8px; background: url("../icons/icon-192.png") center/cover; flex: none; box-shadow: 0 4px 12px -5px rgba(58, 68, 207, .7); }
 
 /* нижние вкладки: бегунок едет к активной вкладке */
@@ -317,6 +330,39 @@ li.now .st-ic { background: var(--accent-soft); color: var(--accent); animation:
 
 /* ---------- Стартовый экран ---------- */
 .start { display: grid; gap: 12px; }
+
+/* Шапка: стопка документов, лупа находит место, маркер проводит цитату, в лупе — галочка (как в знаке).
+   Геометрия в px: строка n — на 18 + 14·n px от верха листа, ширина текста листа — 86 px. Круг = HERO_T в chat.js. */
+.hero { display: grid; justify-items: center; gap: 8px; padding: 8px 0 4px; text-align: center; }
+.hero-title { font-size: 22px; font-weight: 750; letter-spacing: -.02em; }
+.hero-sub { max-width: 32ch; font-size: 14.5px; line-height: 1.45; color: var(--muted); }
+.hero-art { --row: 1; --lx: .14; --lw: .58; --ht: 6.4s; position: relative; width: 184px; height: 136px; margin-bottom: 8px; }
+.ha-sheet { position: absolute; left: 50%; top: 4px; display: flex; flex-direction: column; gap: 8px; width: 116px; height: 128px; margin-left: -58px; padding: 18px 14px 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.ha-sheet i { position: relative; z-index: 1; display: block; height: 6px; border-radius: 3px; background: #dfe3ee; }
+.ha-sheet.back { background: var(--surface-2); }
+.ha-sheet.back i { background: #e9ecf3; }
+.ha-sheet.b1 { transform: translate(-28px, 6px) rotate(-8deg); }
+.ha-sheet.b2 { transform: translate(28px, 4px) rotate(7deg); }
+.ha-sheet.front { box-shadow: var(--shadow-md); }
+.ha-mark { position: absolute; left: calc(14px + var(--lx) * 86px); top: calc(14px + var(--row) * 14px); width: calc(var(--lw) * 86px); height: 14px; border-radius: 3px; background: var(--hl); box-shadow: 0 2px 0 var(--hl-line); transform-origin: left center; }
+.ha-lens { --y: calc(4px + var(--row) * 14px); --xa: calc(var(--lx) * 86px - 3px); --xb: calc((var(--lx) + var(--lw)) * 86px - 3px);
+  position: absolute; left: 0; top: 0; z-index: 2; display: grid; place-items: center; width: 34px; height: 34px; border: 3px solid var(--accent); border-radius: 50%; color: var(--accent);
+  background: rgba(255, 255, 255, .45); box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .8), 0 8px 16px -8px rgba(58, 68, 207, .7); transform: translate(var(--xb), var(--y)); }
+.ha-lens::after { content: ""; position: absolute; left: 24px; top: 23px; width: 12px; height: 5px; border-radius: 3px; background: var(--accent-ink); transform: rotate(45deg); transform-origin: left center; }
+.ha-lens svg { width: 18px; height: 18px; }
+.ha-lens, .ha-mark { animation: ha-lens var(--ht) cubic-bezier(.65, 0, .35, 1) var(--t0, 0s) infinite; }
+.ha-mark { animation-name: ha-mark; }
+.ha-lens svg { animation: ha-check var(--ht) ease-out var(--t0, 0s) infinite; }
+@keyframes ha-lens {
+  0% { opacity: 0; transform: translate(88px, -20px) scale(.8); }
+  10% { opacity: 1; transform: translate(78px, -10px); }
+  22% { transform: translate(34px, calc(var(--y) - 22px)); }
+  36% { transform: translate(var(--xa), var(--y)); }
+  58%, 86% { opacity: 1; transform: translate(var(--xb), var(--y)); }
+  100% { opacity: 0; transform: translate(var(--xb), calc(var(--y) - 10px)) scale(.92); }
+}
+@keyframes ha-mark { 0%, 36% { opacity: 1; transform: scaleX(0); } 58%, 86% { opacity: 1; transform: none; } 100% { opacity: 0; transform: none; } }
+@keyframes ha-check { 0%, 58% { opacity: 0; transform: scale(0); } 64% { opacity: 1; transform: scale(1.18); } 70%, 100% { opacity: 1; transform: none; } }
 .kb-card { display: flex; align-items: center; gap: 14px; padding: 14px 14px 14px 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); color: var(--ink); text-decoration: none; transition: border-color .2s, box-shadow .3s var(--ease), transform .3s var(--ease); }
 a.kb-card:hover { border-color: rgba(58, 68, 207, .35); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-md); }
 a.kb-card:active { transform: scale(.985); }
@@ -393,13 +439,24 @@ a.kb-card:hover .kb-go { transform: translateX(3px); color: var(--accent); }
 .search-box .input { padding-left: 38px; border-radius: 14px; }
 .filters { display: flex; gap: 6px; overflow-x: auto; margin: 0 -14px; padding: 0 14px; scrollbar-width: none; }
 .filters::-webkit-scrollbar { display: none; }
-.bulk { position: sticky; top: 8px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px 8px 14px; margin-bottom: 12px; background: var(--navy); color: #fff; border-radius: 14px; box-shadow: var(--shadow-lg); animation: rise .3s var(--ease); }
-.bulk b { margin-right: 6px; font-size: 14px; }
+.bulk { position: sticky; top: 8px; z-index: 5; display: grid; gap: 8px; padding: 8px 12px 12px; margin-bottom: 12px; background: var(--navy); color: #fff; border-radius: 16px; box-shadow: var(--shadow-lg); animation: rise .3s var(--ease); }
+.bulk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-left: 4px; }
+.bulk-head b { font-size: 14.5px; }
+.bulk-x { display: inline-flex; align-items: center; gap: 4px; min-height: 36px; padding: 0 8px; margin-right: -4px; border: 0; border-radius: 10px; background: none; color: #c5cad4; font-size: 13px; font-weight: 600; cursor: pointer; }
+.bulk-x:hover { background: #2a3352; color: #fff; }
+.bulk-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.bulk-acts .btn { flex: 1 1 auto; min-height: 40px; }
+.bulk-acts .btn-primary { flex-basis: 100%; }
 .bulk .btn-ghost { background: #2a3352; border-color: #3a4466; color: #fff; }
 .bulk .btn-ghost:hover { background: #343e60; }
-.bulk .icon-btn { color: #c5cad4; margin-left: auto; }
-.bulk .icon-btn:hover { background: #2a3352; color: #fff; }
-.list-head { display: flex; align-items: center; gap: 12px; padding: 0 12px 8px; font-size: 13px; color: var(--muted); }
+.bulk .btn-del { background: #3f2a40; border-color: #8a4450; color: #ffb1a9; }
+.bulk .btn-del:hover { background: #4d2e44; color: #ffd0cb; }
+.bulk .btn-ok { background: #1f3d40; border-color: #3d7a5c; color: #9fe8bf; }
+.bulk .btn-ok:hover { background: #24494a; }
+.bulk .btn-warn { background: #3d3436; border-color: #8a6a35; color: #ffd28f; }
+.bulk .btn-warn:hover { background: #4a3d3a; }
+.list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px 8px; font-size: 13px; color: var(--muted); }
+.sel-all { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; margin-left: -6px; padding-right: 12px; border-radius: 10px; color: var(--ink-2); font-size: 13.5px; font-weight: 600; cursor: pointer; }
 .group { margin-bottom: 16px; }
 .group-h { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: var(--ink-2); margin: 4px 4px 8px; }
 .group-h .count { color: var(--muted); font-weight: 500; }
@@ -420,8 +477,7 @@ a.doc-name:hover { color: var(--accent); text-decoration: underline; }
 .doc-hint { display: flex; align-items: baseline; gap: 2px; font-size: 12.5px; color: var(--ink-2); background: var(--info-soft); border-radius: 8px; padding: 4px 9px; margin-top: 4px; justify-self: start; }
 .empty-card .doc-hint { font-size: 13.5px; }
 .doc-status, .doc-actions { grid-column: 3; }
-.doc-actions { display: flex; align-items: center; gap: 2px; margin-top: -2px; }
-.doc-actions .btn { margin-right: 4px; }
+.doc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 4px; }
 .doc-actions .icon-btn { width: 36px; height: 36px; }
 .hide-sm { display: none; }
 .trash-note { display: flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted); margin-bottom: 12px; }
@@ -540,14 +596,16 @@ mark.hl { background: linear-gradient(var(--hl), var(--hl)) 0 0 / 100% 100% no-r
 .about > p { margin-top: 6px; }
 .about .opt { margin-top: 4px; }
 
-.toasts { position: fixed; z-index: 70; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); display: grid; gap: 8px; width: min(520px, calc(100vw - 20px)); pointer-events: none; }
-.toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 16px; border-radius: 16px; background: rgba(29, 36, 65, .94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #fff; font-size: 14px; box-shadow: var(--shadow-lg); animation: up .4s var(--spring); }
-.toast span { flex: 1; }
+/* Уведомления на телефоне — поверх шапки, а не поверх содержимого: шапка на пару секунд не нужна, а карточки и кнопки
+   под ней остаются видны. Короткое уведомление укладывается в высоту шапки. Нажатие по тексту закрывает. */
+.toasts { position: fixed; z-index: 70; left: 50%; top: calc(8px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); display: grid; gap: 8px; width: min(520px, calc(100vw - 16px)); pointer-events: none; }
+.toast { pointer-events: auto; display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 4px 4px 16px; border-radius: 14px; font-size: 13.5px; line-height: 1.35; background: rgba(29, 36, 65, .96); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #fff; box-shadow: var(--shadow-lg); animation: up .4s var(--spring); }
+.toast > span { flex: 1; padding: 6px 0; }
 .toast .btn-ghost { background: #2a3352; border-color: #3a4466; color: #fff; }
 .toast .icon-btn { color: #c5cad4; width: 32px; height: 32px; }
 .toast .icon-btn:hover { background: #2a3352; color: #fff; }
 .toast.warn { background: #7a4500; }
-.toast.out { opacity: 0; transform: translateY(6px); transition: opacity .2s, transform .2s; }
+.toast.out { opacity: 0; transform: translateY(-8px); transition: opacity .2s, transform .2s; }
 @keyframes up { from { transform: translateY(var(--toast-from, -14px)) scale(.97); opacity: 0; } }
 .drop-overlay { position: fixed; inset: 0; z-index: 75; display: grid; place-items: center; background: rgba(58, 68, 207, .12); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); pointer-events: none; animation: fade .2s both; }
 .drop-box { display: grid; justify-items: center; gap: 6px; padding: 32px 40px; border: 2px dashed var(--accent); border-radius: 22px; background: var(--surface); box-shadow: var(--shadow-lg); text-align: center; animation: pop .35s var(--spring) both; }
@@ -581,7 +639,7 @@ main.nav-pop > * { animation: nav-pop .36s var(--ease) both; }
 main.nav-fade > * { animation: fade .3s ease both; }
 
 /* стартовый экран: каскад карточки базы и примеров */
-.start.enter :is(.kb-card, .start-actions, .ex-title, .example) { animation: rise .5s var(--ease) both; animation-delay: calc(80ms + var(--i, 0) * 55ms); }
+.start.enter :is(.hero, .kb-card, .start-actions, .ex-title, .example) { animation: rise .5s var(--ease) both; animation-delay: calc(80ms + var(--i, 0) * 55ms); }
 
 /* сообщения */
 .chat-title.enter, .msg.system.enter { animation: fade .4s both; }
@@ -682,6 +740,7 @@ main.nav-fade > * { animation: fade .3s ease both; }
 @media (hover: hover) and (pointer: fine) { .fuse-button__idle:not(:disabled):hover, .fuse-button__undo:hover { background: color-mix(in srgb, var(--fb-ink) 7%, transparent); } }
 .fuse-button.fb-ghost { --fb-bg: var(--surface); --fb-ink: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); }
 .fuse-button.fb-ghost[data-phase="armed"] { --fb-ink: var(--ink); box-shadow: none; }
+.fuse-button.fb-del[data-phase="idle"] { --fb-bg: var(--err-soft); --fb-ink: var(--err); box-shadow: inset 0 0 0 1px #f2c4bf; }
 .fuse-button.fb-toast { --fb-bg: #2a3352; --fb-h: 34px; --fb-fs: 13px; --fb-icon: 14px; --fb-px: 12px; --fb-radius: 10px; flex: none; }
 
 /* SpotlightCard — https://reactbits.dev/components/spotlight-card: пятно света под курсором (только мышь) */
@@ -699,7 +758,8 @@ main.nav-fade > * { animation: fade .3s ease both; }
 
 /* ---------- Заставка ----------
    Логотип собирается по слоям: знак «всплывает» на пружине, по нему проходит блик, название и подпись
-   поднимаются следом. Только opacity и transform — плавно и на слабом телефоне. Затем app.js переносит знак на место логотипа в шапке.
+   поднимаются следом. Только opacity и transform — плавно и на слабом телефоне. Затем app.js переносит знак на место логотипа в шапке,
+   а тёмный фон сжимается кругом (clip-path) в этот знак — без полупрозрачного «серого» кадра поверх приложения.
    Если скрипт не загрузился — заставка гаснет сама. Координаты слоёв — доли исходного квадрата 2048 px. */
 .splash { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; pointer-events: none; animation: splash-gone .4s ease 3.2s forwards; }
 .splash-bg { position: absolute; inset: 0; background: linear-gradient(180deg, #1a2350 0%, #161c3d 55%, #11162f 100%); }
@@ -779,6 +839,9 @@ main.nav-fade > * { animation: fade .3s ease both; }
   .example:hover:not(:disabled) .ex-tile { transform: rotate(-6deg) scale(1.06); }
   .start-actions { display: flex; }
   .kb-card { padding: 16px 18px; }
+  .hero { padding: 16px 0 8px; }
+  .hero-title { font-size: 26px; }
+  .hero-sub { font-size: 15px; }
 
   .docs-view, .list-view, .doc-page { padding: 28px 28px 48px; }
   .head-actions { display: flex; }
@@ -803,7 +866,17 @@ main.nav-fade > * { animation: fade .3s ease both; }
   .doc-row .ftype { width: 40px; height: 46px; font-size: 10.5px; }
   .doc-row:hover { background: var(--surface-2); }
   .doc-status, .doc-actions { grid-column: auto; }
-  .doc-actions { margin: 0; }
+  .doc-actions { margin: 0; gap: 4px; flex-wrap: nowrap; }
+  .doc-actions .act { width: 36px; min-height: 36px; padding: 0; border-color: transparent; background: none; color: var(--muted); }
+  .doc-actions .act span { display: none; }
+  .doc-actions .act:hover { background: var(--surface-2); color: var(--ink); }
+  .doc-actions .act.btn-del { color: var(--err); }
+  .doc-actions .act.btn-del:hover { background: var(--err-soft); }
+  .bulk { display: flex; flex-wrap: wrap; align-items: center; padding: 8px 8px 8px 16px; }
+  .bulk-head { display: contents; }
+  .bulk-x { order: 2; margin-left: auto; }
+  .bulk-acts .btn { flex: none; min-height: 34px; }
+  .bulk-acts .btn-primary { flex-basis: auto; }
   .hide-sm { display: inline-flex; }
   .back-link { display: inline-flex; }
   .doc-head h1 { font-size: 22px; }

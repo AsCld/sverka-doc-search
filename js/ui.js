@@ -124,6 +124,7 @@ export function toast(text, { action, onAction, kind = '', undo = false } = {}) 
     return;
   }
   if (action) el.querySelector('.btn').onclick = () => { onAction?.(); close(); };
+  el.querySelector('span').onclick = close; // на телефоне уведомление лежит поверх шапки — убрать его можно касанием
   box.append(el);
   setTimeout(close, action ? 8000 : 4500);
 }

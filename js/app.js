@@ -152,12 +152,12 @@ function renderRoleSeg() {
     seg.querySelectorAll('[data-role]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.role === role())));
   }
   const note = $('#roleNote');
-  if (note) note.textContent = isContractor() ? 'Видны только коллекции, открытые подрядчикам' : 'Видны все документы и управление ими';
+  if (note) note.textContent = isContractor() ? 'Видны только папки, открытые подрядчикам' : 'Видны все документы, можно ими управлять';
 }
 
 function renderTopbar(r) {
   const back = (href, label) => `<a class="icon-btn tb-back" href="${href}" aria-label="${label}">${icon('back')}</a>`;
-  let left, title, right = `<button type="button" class="ava-btn ${isContractor() ? 'ext' : ''}" data-act="profile" aria-label="Роль: ${isContractor() ? 'подрядчик' : 'сотрудник'}. Сменить">${isContractor() ? 'П' : 'С'}</button>`;
+  let left, title, right = `<button type="button" class="role-chip ${isContractor() ? 'ext' : ''}" data-act="profile" aria-haspopup="dialog" aria-label="Роль: ${isContractor() ? 'подрядчик' : 'сотрудник'}. Сменить роль"><span class="rc-ava" aria-hidden="true">${isContractor() ? 'П' : 'С'}</span><span class="rc-name">${isContractor() ? 'Подрядчик' : 'Сотрудник'}</span>${icon('chevron', 'sm')}</button>`;
   if (r.view === 'chat' && r.id) {
     left = back('#/history', 'К истории');
     title = esc(getChat(r.id)?.title || 'Диалог');
@@ -243,11 +243,11 @@ function switchRole(r, from) {
 async function profile(btn) {
   const opt = (id, title, text) => `<label class="opt role-opt"><input type="radio" name="role" value="${id}" ${role() === id ? 'checked' : ''}><span><b>${title}</b><small>${text}</small></span></label>`;
   const res = await modal({
-    title: 'Роль в демо',
-    body: `<p class="muted">Показывает модель доступа: у каждой роли свой набор документов. Настоящей авторизации в прототипе нет.</p>
+    title: 'Кто вы?',
+    body: `<p class="muted">От роли зависит, какие документы вы видите. Это демо: входа по паролю нет, роль можно менять в любой момент.</p>
       <fieldset class="scope-opts"><legend class="sr-only">Роль</legend>
-      ${opt('staff', 'Сотрудник', 'Все коллекции, загрузка и управление документами, выдача доступа')}
-      ${opt('contractor', 'Подрядчик', 'Внешний пользователь: только коллекции, открытые подрядчикам; без загрузки и удаления')}
+      ${opt('staff', 'Сотрудник', 'Видит все документы. Может загружать, перемещать и удалять их, открывать папки подрядчикам')}
+      ${opt('contractor', 'Подрядчик', 'Внешний пользователь. Видит только папки, которые ему открыли. Загружать и удалять не может')}
       </fieldset>`,
     actions: [{ label: 'О прототипе', value: 'about' }, { label: 'Готово', cls: 'btn-primary', submit: true, collect: (d) => d.querySelector('[name=role]:checked').value }],
   });
@@ -314,7 +314,7 @@ function renderPanel() {
           <a class="icon-btn close-x" href="${close}" aria-label="Закрыть источник">${icon('x')}</a>
         </div>
       </div>
-      <div class="panel-quote"><span class="eyebrow">${near ? 'Ближайший фрагмент' : 'Подтверждающий фрагмент'}</span><blockquote>${esc(s.quote)}</blockquote>
+      <div class="panel-quote"><span class="eyebrow">${near ? 'Похожее место в документе' : 'Цитата из документа'}</span><blockquote>${esc(s.quote)}</blockquote>
         <div class="pq-actions">${d && !d.deletedAt && canSee(d) ? `<button type="button" class="link-btn pq-expand" data-sheet="full">${icon('docs', 'sm')}Показать в документе</button><a class="link-btn" href="#/doc/${d.id}?b=${s.blockIndex}&q=${encodeURIComponent(s.quote)}&from=${c.id}">${icon('open', 'sm')}Открыть документ целиком</a>` : ''}</div></div>
       <div class="panel-body" tabindex="-1">${body}</div>`;
   }
@@ -377,7 +377,7 @@ function historyView() {
     mount(m) { m.innerHTML = '<section class="list-view" id="histView"></section>'; root = m.querySelector('#histView'); this.update(); },
     update() {
       const list = chatListHtml(cur.route || { view: 'history' }, 'hist-list');
-      const html = `<header class="view-head"><h1>История</h1></header>${list || `<div class="empty-card center">${icon('history', 'lg')}<h2>Диалогов пока нет</h2><p>Каждый диалог хранит свою область поиска и контекст уточнений.</p><a class="btn btn-primary" href="#/">Задать вопрос</a></div>`}`;
+      const html = `<header class="view-head"><h1>История</h1></header>${list || `<div class="empty-card center">${icon('history', 'lg')}<h2>Диалогов пока нет</h2><p>Каждый диалог помнит, где вы искали и что уточняли.</p><a class="btn btn-primary" href="#/">Задать вопрос</a></div>`}`;
       if (root._html !== html) { root.innerHTML = html; root._html = html; }
     },
   };
@@ -424,10 +424,10 @@ async function about() {
       <li>Поиск BM25 со стеммингом по фрагментам документов выбранной области; признак «нет в документах».</li>
       <li>Ответ пишет модель GigaChat (через серверную функцию на Vercel, ключ только на сервере) — по найденным фрагментам. Каждая ссылка [n] сверяется с текстом документа: цитата должна найтись дословно, иначе ответ модели не показывается.</li>
       <li>Уточняющие вопросы с учётом предыдущего вопроса диалога; вопрос по выделенному фрагменту документа.</li>
-      <li>Роли «Сотрудник» и «Подрядчик»: доступ задаётся на коллекцию, фильтр стоит до поиска. Авторизации нет — роль переключается вручную.</li>
+      <li>Роли «Сотрудник» и «Подрядчик»: доступ задаётся на папку (коллекцию), фильтр стоит до поиска. Авторизации нет — роль переключается вручную.</li>
       <li>Хранение документов, диалогов и сохранённых ответов в localStorage.</li></ul>
       <h3>Что моделируется</h3>
-      <ul><li>Запасной режим без модели (лимит, сбой сети, ответ не прошёл сверку — в ответе пометка «Без модели»): на демо-вопросы — заранее подготовленные ответы, каждая цитата которых проверяется по тексту документов; на остальные — дословные найденные цитаты.</li>
+      <ul><li>Запасной режим без модели (лимит, сбой сети, ответ не прошёл сверку — в ответе пометка «Без ИИ»): на демо-вопросы — заранее подготовленные ответы, каждая цитата которых проверяется по тексту документов; на остальные — дословные найденные цитаты.</li>
       <li>Паузы обработки и «шаги» ответа замедлены, чтобы состояния были различимы.</li></ul>
       <h3>Клавиатура</h3>
       <ul><li><kbd>Enter</kbd> — отправить, <kbd>Shift</kbd>+<kbd>Enter</kbd> — новая строка, <kbd>/</kbd> — к полю вопроса, <kbd>Esc</kbd> — закрыть источник или окно.</li></ul>
@@ -496,7 +496,7 @@ addEventListener('dragenter', (e) => {
   e.preventDefault();
   if (dragDepth++ === 0) {
     const col = cur.view.dropTarget?.();
-    drop.querySelector('[data-target]').textContent = col ? `в коллекцию «${state.collections.find((c) => c.id === col)?.name}»` : 'в документы (без коллекции)';
+    drop.querySelector('[data-target]').textContent = col ? `в папку «${state.collections.find((c) => c.id === col)?.name}»` : 'в документы (без папки)';
     drop.hidden = false;
   }
 });
@@ -526,7 +526,9 @@ addEventListener('keydown', (e) => {
 
 // ---------- Заставка ----------
 // Слои логотипа анимирует CSS. Здесь — финал: название и подпись уходят, знак перелетает на место логотипа
-// в шапке (или в боковом меню), фон растворяется, приложение «раскрывается» из-под него.
+// в шапке (или в боковом меню), а тёмный фон сжимается кругом и улетает вместе со знаком.
+// Фон не растворяем: полупрозрачный тёмный поверх светлого приложения даёт «грязно-серые» кадры. Здесь каждый пиксель —
+// либо заставка, либо уже приложение, яркость меняется по краю круга, а не всего экрана сразу.
 function splashOut() {
   const splash = $('#splash');
   if (!splash || !window.__splash) return;
@@ -534,18 +536,21 @@ function splashOut() {
     const icon = splash.querySelector('.sp-icon');
     const target = [...document.querySelectorAll('.logo-mark')].find((el) => el.getClientRects().length && el.getBoundingClientRect().width);
     splash.style.animation = 'none';
-    const ease = 'cubic-bezier(.7, 0, .2, 1)';
-    for (const el of splash.querySelectorAll('.sp-title, .sp-sub, .sp-sheen')) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(10px)' }], { duration: 220, fill: 'forwards' });
-    let fly;
-    if (target) {
-      // Квадрат знака без свечения — 75,6 % слоя, центр совпадает с центром слоя.
-      const a = icon.getBoundingClientRect(), b = target.getBoundingClientRect();
-      target.style.visibility = 'hidden';
-      fly = icon.animate([{ transform: 'none', opacity: 1 }, { opacity: 1, offset: 0.85 }, { transform: `translate(${b.left + b.width / 2 - (a.left + a.width / 2)}px, ${b.top + b.height / 2 - (a.top + a.height / 2)}px) scale(${b.width / (a.width * 0.756)})`, opacity: 0.9 }], { duration: 680, easing: ease, fill: 'forwards' });
-    } else fly = icon.animate([{ transform: 'none', opacity: 1 }, { transform: 'scale(1.4)', opacity: 0 }], { duration: 420, easing: ease, fill: 'forwards' });
-    splash.querySelector('.splash-bg').animate([{ opacity: 1 }, { opacity: 0 }], { duration: 480, delay: 140, easing: 'ease', fill: 'forwards' });
-    // После анимации эффект снимаем: transform на .app создал бы контекст наложения и лист источника ушёл бы под затемнение.
-    $('.app').animate([{ transform: 'scale(.97)', opacity: 0.3 }, { transform: 'none', opacity: 1 }], { duration: 600, delay: 100, easing: 'cubic-bezier(.22, .8, .24, 1)', fill: 'backwards' }).finished.then((a) => a.cancel());
+    const ease = 'cubic-bezier(.65, 0, .35, 1)', duration = 780;
+    for (const el of splash.querySelectorAll('.sp-title, .sp-sub, .sp-sheen')) el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(8px)' }], { duration: 200, easing: 'ease-in', fill: 'forwards' });
+    // Квадрат знака без свечения — 75,6 % слоя, центр совпадает с центром слоя.
+    const a = icon.getBoundingClientRect(), b = target?.getBoundingClientRect();
+    const [x0, y0] = [a.left + a.width / 2, a.top + a.height / 2];
+    const [dx, dy] = b ? [b.left + b.width / 2 - x0, b.top + b.height / 2 - y0] : [0, 0];
+    if (target) target.style.visibility = 'hidden';
+    const fly = icon.animate([{ transform: 'none' }, b ? { transform: `translate(${dx}px, ${dy}px) scale(${b.width / (a.width * 0.756)})` } : { transform: 'scale(.6)', opacity: 0 }], { duration, easing: ease, fill: 'forwards' });
+    // Центр круга едет по той же кривой, что и знак, поэтому круг всё время «под» знаком; в конце он меньше знака и скрыт им.
+    const R = Math.hypot(Math.max(x0, innerWidth - x0), Math.max(y0, innerHeight - y0));
+    const circle = (p, r) => `circle(${r}px at ${x0 + dx * p}px ${y0 + dy * p}px)`;
+    splash.querySelector('.splash-bg').animate([{ clipPath: circle(0, R) }, { clipPath: circle(0.45, R * 0.3), offset: 0.45 }, { clipPath: circle(1, b ? b.width * 0.4 : 0) }], { duration, easing: ease, fill: 'forwards' });
+    // Приложение чуть «поднимается» навстречу. Эффект потом снимаем: transform на .app создал бы контекст наложения
+    // и лист источника ушёл бы под затемнение.
+    $('.app').animate([{ transform: 'scale(.985)' }, { transform: 'none' }], { duration, easing: 'cubic-bezier(.22, .8, .24, 1)' });
     fly.finished.then(() => { if (target) target.style.visibility = ''; splash.remove(); });
   }, Math.max(0, t0 + 1450 - performance.now())));
 }
