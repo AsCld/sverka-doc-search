@@ -12,7 +12,7 @@ const files = new Map(); // docId → File, только в текущей се�
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 function fresh() {
-  return { v: 1, collections: [], docs: [], chats: [], saved: [], drafts: {}, newScope: { type: 'all' }, settings: { failNext: false } };
+  return { v: 1, collections: [], docs: [], chats: [], saved: [], drafts: {}, newScope: { type: 'all' }, settings: { failNext: false, role: 'staff' } };
 }
 
 function load() {
@@ -49,7 +49,20 @@ export function commit() { save(); emit(); }
 export const doc = (id) => state.docs.find((d) => d.id === id);
 export const chat = (id) => state.chats.find((c) => c.id === id);
 export const collection = (id) => state.collections.find((c) => c.id === id);
-export const liveDocs = () => state.docs.filter((d) => !d.deletedAt);
+// ---------- Роли (демо модели доступа) ----------
+// Сотрудник видит всё. Подрядчик — только документы коллекций, открытых внешним пользователям (external).
+// Фильтр стоит до поиска: агент получает только доступные документы, поэтому закрытые не всплывают
+// ни в ответах, ни в подсказке «ответ есть вне области».
+export const role = () => state.settings.role || 'staff';
+export const isContractor = () => role() === 'contractor';
+export const canSee = (d) => !isContractor() || !!collection(d.collectionId)?.external;
+export const accessibleDocs = () => state.docs.filter(canSee);
+export const visibleCollections = () => (isContractor() ? state.collections.filter((c) => c.external) : state.collections);
+export const liveDocs = () => state.docs.filter((d) => !d.deletedAt && canSee(d));
+export const myChats = () => state.chats.filter((c) => (c.role || 'staff') === role());
+export const mySaved = () => state.saved.filter((s) => (s.role || 'staff') === role());
+export function setRole(r) { state.settings.role = r; state.newScope = { type: 'all' }; commit(); }
+export function setExternal(id, on) { const c = collection(id); if (c) c.external = on; commit(); }
 
 // ---------- Документы ----------
 function newDoc(name, size, collectionId, demoKey = null) {
@@ -78,8 +91,9 @@ export function ensureCollection(name) {
 
 // Демо-набор проходит тот же конвейер, что и загруженные пользователем файлы.
 export function loadDemo() {
-  const have = new Set(liveDocs().map((d) => d.demoKey).filter(Boolean));
+  const have = new Set(state.docs.filter((d) => !d.deletedAt).map((d) => d.demoKey).filter(Boolean));
   const cols = Object.fromEntries(Object.entries(COLLECTIONS).map(([k, name]) => [k, ensureCollection(name).id]));
+  collection(cols.contractors).external ??= true;
   const add = FILES.filter((f) => !have.has(f.key)).map((f) => newDoc(f.file, 0, cols[f.col], f.key));
   state.docs.unshift(...add);
   const n = add.length;
@@ -178,7 +192,7 @@ export function deleteCollection(id) {
 
 // ---------- Диалоги ----------
 export function createChat(scope, title) {
-  const c = { id: uid(), title: title.slice(0, 80), createdAt: Date.now(), updatedAt: Date.now(), scope, messages: [] };
+  const c = { id: uid(), title: title.slice(0, 80), createdAt: Date.now(), updatedAt: Date.now(), scope, messages: [], role: role() };
   state.chats.unshift(c);
   return c;
 }
@@ -194,7 +208,7 @@ export function toggleSaved(chatId, msgId) {
     const c = chat(chatId);
     const idx = c.messages.findIndex((m) => m.id === msgId);
     const q = [...c.messages.slice(0, idx)].reverse().find((m) => m.role === 'user');
-    state.saved.unshift({ id: uid(), chatId, msgId, question: q?.text || '', answer: c.messages[idx].answer, savedAt: Date.now() });
+    state.saved.unshift({ id: uid(), chatId, msgId, question: q?.text || '', answer: c.messages[idx].answer, savedAt: Date.now(), role: c.role || 'staff' });
   }
   commit();
   return i < 0;
@@ -210,4 +224,5 @@ export function reset() {
 // После перезагрузки: прерванные ответы и обработка.
 for (const c of state.chats) for (const m of c.messages) if (m.pending) { m.pending = false; m.error = 'Ответ был прерван перезагрузкой страницы.'; }
 for (const d of state.docs) if (d.status === 'processing') d.status = 'queued';
+for (const c of state.collections) if (c.name === COLLECTIONS.contractors) c.external ??= true; // данные до появления ролей
 if (state.docs.some((d) => d.status === 'queued')) setTimeout(pump, 300);

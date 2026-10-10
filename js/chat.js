@@ -1,19 +1,22 @@
 // Экран чата: стартовый экран, сообщения, ответы с источниками, область поиска, ввод.
 
-import { state, chat as getChat, commit, emit, save, createChat, toggleSaved, uid, liveDocs, loadDemo, restoreDocs } from './store.js';
+import { state, chat as getChat, doc as getDoc, collection, commit, emit, save, createChat, toggleSaved, uid, liveDocs, loadDemo, restoreDocs, accessibleDocs, visibleCollections, isContractor, role } from './store.js';
 import { askAI, scopeInfo } from './agent.js';
-import { EXAMPLES, FILES } from '../demo/manifest.js';
-import { lattice, blurWords } from './fx.js';
+import { EXAMPLES, EXAMPLES_EXT, FILES } from '../demo/manifest.js';
+import { lattice, ring } from './fx.js';
 import { esc, icon, inline, anchor, plural, nDocs, fmtDate, toast, modal, statusBadge, TYPE, reveal } from './ui.js';
 
 const running = new Map(); // msgId → { cancelled, ctrl }
 const justSent = new Set(); // id нового диалога и сообщений: анимируются, даже если вид только что открыт
+let morph = null; // id вопроса, в который «перелетает» пример или поле ввода (View Transitions)
 const inDocs = (n) => `${n} ${n % 10 === 1 && n % 100 !== 11 ? 'документе' : 'документах'}`;
 const shortName = (name) => name.replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ');
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export const scopeOf = (c) => (c ? c.scope : state.newScope);
-const info = (c) => scopeInfo(scopeOf(c), state.docs, state.collections);
+// Агент получает только документы, доступные роли: фильтр до поиска, а не после.
+const info = (c) => scopeInfo(scopeOf(c), accessibleDocs(), visibleCollections());
+const extOf = (name) => (name.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
 
 // ---------- Отправка и формирование ответа ----------
 async function runAnswer(c, m) {
@@ -25,7 +28,7 @@ async function runAnswer(c, m) {
   const question = c.messages[idx - 1].text;
   const fail = state.settings.failNext;
   // Поиск фрагментов синхронный и заканчивается сразу; паузы между шагами — только чтобы их было видно.
-  const job = fail ? null : askAI({ question, history: c.messages.slice(0, idx - 1), scope: c.scope, docs: state.docs, collections: state.collections },
+  const job = fail ? null : askAI({ question, history: c.messages.slice(0, idx - 1), scope: c.scope, docs: accessibleDocs(), collections: visibleCollections() },
     { signal: token.ctrl.signal, onFound: (f) => { m.found = f; } });
   job?.catch(() => {}); // ошибку разбираем ниже, при await
   if (await step(0, m.found ? 700 : 300)) return;
@@ -94,7 +97,7 @@ export function setScope(c, scope) {
     const before = JSON.stringify(c.scope);
     c.scope = scope;
     if (before !== JSON.stringify(scope) && c.messages.length) {
-      c.messages.push({ id: uid(), role: 'system', text: `Область поиска изменена: ${scopeInfo(scope, state.docs, state.collections).label}`, at: Date.now() });
+      c.messages.push({ id: uid(), role: 'system', text: `Область поиска изменена: ${scopeInfo(scope, accessibleDocs(), visibleCollections()).label}`, at: Date.now() });
     }
   } else state.newScope = scope;
   commit();
@@ -111,9 +114,9 @@ function scopeBar(c) {
     const extra = [];
     if (inf.pending) extra.push(`ещё ${inf.pending} в обработке`);
     if (inf.errors) extra.push(`${inf.errors} с ошибкой не участвуют`);
-    note = extra.length ? `Ответ — по ${nDocs(inf.ready.length)}; ${extra.join(', ')}.` : '';
+    note = inf.pending ? `Ответ — по ${nDocs(inf.ready.length)}; ${extra.join(', ')}.` : ''; // ошибки чтения видны в карточке базы
   }
-  const actions = tone === 'warn' ? `<span class="scope-actions">${state.docs.some((d) => d.status === 'ready' && !d.deletedAt) && scopeOf(c).type !== 'all' ? '<button type="button" class="link-btn" data-act="scope-all">Искать во всех документах</button>' : ''}<a class="link-btn" href="#/docs">Открыть документы</a></span>` : '';
+  const actions = tone === 'warn' ? `<span class="scope-actions">${liveDocs().some((d) => d.status === 'ready') && scopeOf(c).type !== 'all' ? '<button type="button" class="link-btn" data-act="scope-all">Искать во всех документах</button>' : ''}<a class="link-btn" href="#/docs">Открыть документы</a></span>` : '';
   return `<button type="button" class="scope-chip ${tone}" data-act="scope" aria-haspopup="dialog">
       ${icon('scope')}<span class="scope-label">Область: <b>${esc(inf.label)}</b></span>
       <span class="scope-count">${inf.ready.length} ${plural(inf.ready.length, 'готов', 'готовы', 'готовы')}</span>${icon('chevron', 'sm')}
@@ -121,55 +124,50 @@ function scopeBar(c) {
     ${note ? `<span class="scope-note ${tone}" role="status">${esc(note)} ${actions}</span>` : ''}`;
 }
 
-// Иллюстрация стартового экрана — суть продукта за 7 секунд: лупа ищет строку → строка подсвечивается
-// как цитата → появляется ссылка [1] → печать «сверено». Только CSS; при reduce motion — статичный кадр.
-const HERO_ART = `<div class="hero-art" aria-hidden="true">
-  <span class="sheet s3"></span><span class="sheet s2"></span>
-  <span class="sheet s1"><i class="ln ttl"></i><i class="ln"></i><i class="ln w9"></i><i class="ln hit"></i><i class="ln w8"></i><i class="ln w6"></i><i class="ln w9"></i>
-    <span class="art-cite">1</span><span class="stamp">${icon('check')}</span></span>
-  <span class="lens"></span>
-</div>`;
+// Стартовый экран — без рекламного текста: состояние базы (кольцо готовности) и вопросы, с которых можно начать.
+// Карточка базы — это шаг «готовность к поиску» из основного пути, по нажатию открывает документы.
+function kbCard() {
+  const all = liveDocs();
+  const ready = all.filter((d) => d.status === 'ready');
+  const err = all.filter((d) => d.status === 'error').length;
+  const pending = all.length - ready.length - err;
+  const chunks = ready.reduce((n, d) => n + (d.chunks || 0), 0);
+  const cols = new Set(all.map((d) => d.collectionId).filter(Boolean)).size;
+  const r = ring({ key: 'home', ready: ready.length, error: err, total: all.length, size: 58, width: 6, center: `<b data-cu="home:ready" data-to="${ready.length}">${ready.length}</b><small>/${all.length}</small>` });
+  const title = pending ? `Обработка: ${pending} ${plural(pending, 'файл', 'файла', 'файлов')}` : isContractor() ? 'Документы, открытые подрядчику' : 'База готова к поиску';
+  const sub = [`${chunks} ${plural(chunks, 'фрагмент', 'фрагмента', 'фрагментов')}`, `${cols} ${plural(cols, 'коллекция', 'коллекции', 'коллекций')}`, err ? `${err} с ошибкой` : ''].filter(Boolean).join(' · ');
+  return `<a class="kb-card spot" href="#/docs" style="--i:0">${r}<span class="kb-text"><b>${pending ? lattice({ pattern: 'snake', mini: true }) : ''}${esc(title)}</b><small>${esc(sub)}</small></span>${icon('next', 'kb-go')}</a>`;
+}
 
 function startScreen(c) {
   const inf = info(c);
   const all = liveDocs();
-  const ready = all.filter((d) => d.status === 'ready').length;
-  const pending = all.filter((d) => d.status === 'queued' || d.status === 'processing').length;
-  const step1 = !all.length ? '<span class="step-state warn">нет документов</span>'
-    : `<span class="step-state ${ready ? 'ok' : 'info'}">${ready ? `${icon('check', 'sm')}готовы: <b data-cu="ready" data-to="${ready}">${ready}</b> из ${all.length}` : ''}${pending ? `${ready ? ' · ' : ''}${lattice({ pattern: 'snake', mini: true })}${pending} в обработке` : ''}</span>`;
-  const examples = EXAMPLES.map((e, i) => `<button type="button" class="example spot" style="--i:${i + 7}; --hue:${e.hue}" data-ask="${esc(e.q)}" ${inf.ready.length ? '' : 'disabled'}>
-      <span class="ex-tile" aria-hidden="true">${icon(e.icon)}</span><span class="ex-kind">${esc(e.kind)}</span><span class="ex-q">${esc(e.q)}</span>${icon('send', 'ex-ic')}</button>`).join('');
+  if (!all.length) {
+    const body = isContractor()
+      ? `<b>Документы ещё не открыты</b><small>Подрядчик видит только коллекции, к которым ему дали доступ. Переключитесь на роль «Сотрудник», чтобы загрузить демо-набор.</small>`
+      : `<b>Документов пока нет</b><small>Демо-набор — ${FILES.length} вымышленных документов стройки участка ВСМ: протоколы, отчёты, акты, регламенты.</small>`;
+    return `<div class="start" data-k="start"><div class="kb-card empty" style="--i:0">${ring({ key: 'home', total: 0, size: 58, width: 6 })}<span class="kb-text">${body}</span></div>
+      ${isContractor() ? '' : `<div class="start-actions" style="--i:1"><button type="button" class="btn btn-primary" data-act="demo">${icon('upload', 'sm')}Загрузить демо-набор</button><button type="button" class="btn btn-ghost" data-act="pick">Свои файлы</button></div>`}</div>`;
+  }
+  const list = isContractor() ? EXAMPLES_EXT : EXAMPLES;
+  const examples = list.map((e, i) => `<button type="button" class="example spot" style="--i:${i + 2}; --hue:${e.hue}" data-ask="${esc(e.q)}" ${inf.ready.length ? '' : 'disabled'}>
+      <span class="ex-tile" aria-hidden="true">${icon(e.icon)}</span><span class="ex-kind">${esc(e.kind)}</span><span class="ex-q">${esc(e.q)}</span></button>`).join('');
   return `<div class="start" data-k="start">
-    <div class="start-hero">
-      <div class="hero-copy">
-        <span class="hero-eyebrow" style="--i:0"><span class="live-dot" aria-hidden="true"></span>ИИ-агент по рабочим документам</span>
-        <h1 style="--i:1">${blurWords('Найдите ответ в документах и')} <span class="accent-text">${blurWords('сразу проверьте его по источнику', 5)}</span></h1>
-        <p style="--i:2">Сверка ищет по регламентам, протоколам, отчётам и планам. В каждом ответе — точные цитаты и ссылка на страницу или раздел, откуда они взяты.</p>
-      </div>
-      ${HERO_ART}
-    </div>
-    <ol class="steps" aria-label="Как начать">
-      <li class="spot" style="--i:3"><span class="step-n">1</span><div><b>Документы</b>${step1}</div><a class="link-btn" href="#/docs">Открыть</a></li>
-      <li class="spot" style="--i:4"><span class="step-n">2</span><div><b>Область поиска</b><span class="step-state">${esc(inf.label)}</span></div><button type="button" class="link-btn" data-act="scope">Изменить</button></li>
-      <li class="spot" style="--i:5"><span class="step-n">3</span><div><b>Вопрос</b><span class="step-state">ответ, цитаты, источник</span></div></li>
-    </ol>
-    ${!all.length ? `<div class="empty-card" style="--i:6">
-        <h2>Нет документов для поиска</h2>
-        <p>Загрузите демонстрационный набор — ${FILES.length} вымышленных документов стройки участка ВСМ: протоколы, отчёты, график, акт и предписание технадзора, протокол испытаний бетона, регламенты, план поставок, письмо поставщика, памятка для подрядчиков и один скан без текста — он нарочно показывает ошибку чтения. Или добавьте свои PDF, DOCX, TXT, MD.</p>
-        <div class="row-actions"><span class="magnet" data-pad="60" data-k="4"><button type="button" class="btn btn-primary" data-act="demo">${icon('upload')}Загрузить демо-набор</button></span><button type="button" class="btn btn-ghost" data-act="pick">Добавить свои файлы</button></div>
-      </div>`
-      : `<div class="examples-head" style="--i:6"><h2>Примеры вопросов</h2>${inf.ready.length ? '' : '<span class="muted">станут доступны, когда документы будут готовы</span>'}</div><div class="examples">${examples}</div>`}
+    ${kbCard()}
+    <h2 class="ex-title" style="--i:1">${inf.ready.length ? 'С чего начать' : 'Вопросы станут доступны после обработки'}</h2>
+    <div class="examples">${examples}</div>
   </div>`;
 }
 
 function sourceCard(msgId, s, key, attr = '') {
   const d = state.docs.find((x) => x.id === s.docId);
   const gone = !d ? 'Документ удалён — источник недоступен.' : d.deletedAt ? 'Документ в корзине.' : null;
+  const ext = extOf(s.docName);
   return `<li class="src-card spot ${gone ? 'gone' : ''}" data-src-n="${s.n}" ${attr}>
     <button type="button" class="src-open" data-open="${msgId}:${key}" ${!d ? 'disabled' : ''} aria-label="Открыть источник ${s.n}: ${esc(s.docName)}, ${esc(anchor(s))}">
-      <span class="src-n">${s.n}</span>
-      <span class="src-meta"><span class="src-doc">${icon('doc', 'sm')}${esc(s.docName)}</span><span class="src-anchor">${esc(anchor(s))}</span></span>
-      ${d ? icon('open', 'sm src-go') : ''}
+      <span class="src-thumb" aria-hidden="true"><span class="ftype ft-${ext}">${TYPE[ext] || '?'}</span><span class="src-n">${s.n}</span></span>
+      <span class="src-meta"><span class="src-doc">${esc(shortName(s.docName))}</span><span class="src-anchor">${esc(anchor(s))}</span></span>
+      ${d ? `<span class="src-go" aria-hidden="true">${icon('next', 'sm')}</span>` : ''}
     </button>
     <blockquote class="src-quote">${esc(s.quote)}</blockquote>
     ${gone ? `<p class="src-gone">${gone}${d?.deletedAt ? ` <button type="button" class="link-btn" data-restore="${d.id}">Восстановить</button>` : ''}</p>` : ''}
@@ -182,10 +180,20 @@ function blocksHtml(blocks, msgId, nx = () => '') {
     if (b.t === 'p') return `<p ${nx()}>${inline(b.text, msgId)}</p>`;
     if (b.t === 'note') return `<p class="ans-note" ${nx()}>${inline(b.text, msgId)}</p>`;
     if (b.t === 'ul') return `<ul ${nx()}>${b.items.map((i) => `<li>${inline(i, msgId)}</li>`).join('')}</ul>`;
-    if (b.t === 'table') return `<div class="table-wrap" ${nx()}><table><thead><tr>${b.head.map((h) => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${b.rows.map((r) => `<tr>${r.map((c) => `<td>${inline(c, msgId)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+    if (b.t === 'table') return `<div class="table-wrap" ${nx()}><table><thead><tr>${b.head.map((h) => `<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${b.rows.map((r) => `<tr>${r.map((c, i) => `<td data-label="${esc(b.head[i] || '')}"><span>${inline(c, msgId)}</span></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
     if (b.t === 'quotes') return `<ol class="quotes" ${nx()}>${b.items.map((q) => `<li><span class="q-text">«${esc(q.text)}»</span> ${inline(`[${q.n}]`, msgId)}</li>`).join('')}</ol>`;
     return '';
   }).join('');
+}
+
+// Можно ли переслать ответ подрядчику: все ли источники лежат в коллекциях, открытых внешним пользователям.
+// Подрядчик, получив ответ со ссылками на закрытые документы, не сможет его проверить — сотрудник видит это заранее.
+function audience(a) {
+  if (isContractor() || a.kind !== 'answer' || !a.sources?.length) return '';
+  const closed = a.sources.filter((s) => !collection(getDoc(s.docId)?.collectionId)?.external).length;
+  return closed
+    ? `<span class="aud" title="${closed} из ${a.sources.length} ${plural(a.sources.length, 'источника', 'источников', 'источников')} в коллекциях, закрытых для подрядчиков: проверить ответ по ним он не сможет">${icon('lock', 'xs')}Только для сотрудников</span>`
+    : `<span class="aud open" title="Все источники в коллекциях, открытых подрядчикам">${icon('eye', 'xs')}Можно переслать подрядчику</span>`;
 }
 
 function answerHtml(c, m) {
@@ -229,13 +237,14 @@ function answerHtml(c, m) {
     <div class="ans-foot" ${nx()}>
       ${a.kind === 'answer' ? `<button type="button" class="btn btn-sm btn-ghost" data-act="copy" data-msg="${m.id}">${icon('copy', 'sm')}Копировать</button>
       <button type="button" class="btn btn-sm btn-ghost ${saved ? 'on' : ''}" data-act="save" data-msg="${m.id}" aria-pressed="${saved}">${icon('bookmark', 'sm')}${saved ? 'Сохранено' : 'Сохранить'}</button>` : ''}
+      ${audience(a)}
       <details class="how"><summary>Как получен ответ</summary><p>${how}</p></details>
     </div>
     ${a.suggest?.length ? `<div class="suggest" aria-label="Уточняющие вопросы">${a.suggest.map((q) => `<button type="button" class="chip" ${nx()} data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>` : ''}`;
 }
 
 function messageHtml(c, m) {
-  if (m.role === 'user') return `<div class="msg user" data-k="${m.id}"><div class="bubble">${esc(m.text)}</div></div>`;
+  if (m.role === 'user') return `<div class="msg user" data-k="${m.id}"><div class="bubble"${morph === m.id ? ' style="view-transition-name:qfly"' : ''}>${esc(m.text)}</div></div>`;
   if (m.role === 'system') return `<div class="msg system" role="note" data-k="${m.id}">${icon('scope', 'sm')}${esc(m.text)}</div>`;
   let body;
   if (m.pending) body = thinkingHtml(c, m);
@@ -257,10 +266,13 @@ function thinkingHtml(c, m) {
     ['Модель пишет ответ по фрагментам', m.step === 1 ? '<span class="writing" aria-hidden="true"><i></i><i></i><i></i></span>' : ''],
     ['Сверяю цитаты с текстом документов', m.step === 2 && m.checks ? `<span class="ticks" data-k="${m.id}:ticks">${Array.from({ length: m.checks }, (_, i) => `<span class="tick" style="--i:${i}">${icon('check', 'xs')}${i + 1}</span>`).join('')}</span>` : ''],
   ];
+  // Заготовки карточек источников (скелет «широкой карточки»): тип файла уже известен, текст ещё нет.
+  const skel = f ? `<ol class="sk-list" aria-hidden="true" data-k="${m.id}:sk">${f.docs.slice(0, 3).map((d, i) => `<li class="sk-card" style="--i:${i}"><span class="ftype ft-${extOf(d)}">${TYPE[extOf(d)] || '?'}</span><span class="sk-lines"><i></i><i></i><i></i></span><span class="sk-pill"></span></li>`).join('')}</ol>` : '';
   return `<div class="thinking" role="status" aria-live="polite">
     <div class="think-title">${lattice({ label: `Ищу ответ в ${inDocs(inf.ready.length)} · «${inf.label}»`, t0: m.t0 })}</div>
     <ol class="think-steps">${steps.map(([t, x], i) => `<li class="${i < m.step ? 'done' : i === m.step ? 'now' : ''}">
       <span class="st-ic" ${i < m.step ? `data-k="${m.id}:d${i}"` : ''}>${i < m.step ? icon('check', 'sm') : '<span class="dot"></span>'}</span><div class="st-body"><span>${t}</span>${x}</div></li>`).join('')}</ol>
+    ${skel}
     <button type="button" class="btn btn-sm btn-ghost" data-act="stop" data-msg="${m.id}">${icon('stop', 'sm')}Остановить</button>
   </div>`;
 }
@@ -276,7 +288,7 @@ export async function pickScope(c) {
   const cur = scopeOf(c);
   const live = liveDocs();
   const cnt = (list) => { const r = list.filter((d) => d.status === 'ready').length; return `${r} из ${list.length} готовы`; };
-  const cols = [...state.collections.map((x) => ({ id: x.id, name: x.name })), ...(live.some((d) => !d.collectionId) ? [{ id: null, name: 'Без коллекции' }] : [])];
+  const cols = [...visibleCollections().map((x) => ({ id: x.id, name: x.name })), ...(live.some((d) => !d.collectionId) ? [{ id: null, name: 'Без коллекции' }] : [])];
   const body = `<p class="muted">Агент ищет только в документах выбранной области. Файлы в обработке и с ошибкой в поиске не участвуют.</p>
     <fieldset class="scope-opts"><legend class="sr-only">Область поиска</legend>
       <label class="opt"><input type="radio" name="t" value="all" ${cur.type === 'all' ? 'checked' : ''}><span><b>Все документы</b><small>${cnt(live)}</small></span></label>
@@ -319,12 +331,23 @@ export function chatView({ pickFiles }) {
   const ta = () => root.querySelector('#q');
   const autosize = () => { const t = ta(); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 200) + 'px'; };
 
-  function submit(text) {
-    const c = send(chatId, text ?? ta().value);
-    if (!c) return;
-    ta().value = '';
-    autosize();
-    if (!chatId) location.hash = `#/c/${c.id}`;
+  // Новый диалог: вопрос «перелетает» из примера или поля ввода в пузырь сообщения (View Transitions API).
+  // Без поддержки API или при «уменьшить движение» — обычный переход.
+  function submit(text, from = null) {
+    const go = () => {
+      const c = send(chatId, text ?? ta().value);
+      if (!c) return;
+      if (chatId) { ta().value = ''; autosize(); return; }
+      morph = c.messages[0].id;
+      location.hash = `#/c/${c.id}`;
+      dispatchEvent(new HashChangeEvent('hashchange')); // отрисовать сразу, внутри перехода
+    };
+    if (chatId || !document.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches || !info(null).ready.length) return go();
+    const src = from || root.querySelector('.composer');
+    src.style.viewTransitionName = 'qfly';
+    document.documentElement.classList.add('vt-morph');
+    const t = document.startViewTransition(go);
+    t.finished.finally(() => { morph = null; document.documentElement.classList.remove('vt-morph'); src.style.viewTransitionName = ''; });
   }
 
   function onClick(e) {
@@ -333,7 +356,7 @@ export function chatView({ pickFiles }) {
     const c = chatId ? getChat(chatId) : null;
     if (t.matches('.cite')) return openSource(t.dataset.msg, t.dataset.cite);
     if (t.dataset.open) { const [msg, key] = t.dataset.open.split(':'); return openSource(msg, key); }
-    if (t.dataset.ask) return submit(t.dataset.ask);
+    if (t.dataset.ask) return submit(t.dataset.ask, t.closest('.example'));
     if (t.dataset.restore) { restoreDocs([t.dataset.restore]); toast('Документ восстановлен из корзины.'); return; }
     const m = c?.messages.find((x) => x.id === t.dataset.msg);
     switch (t.dataset.act) {
@@ -379,7 +402,6 @@ export function chatView({ pickFiles }) {
             <textarea id="q" rows="1" placeholder="Задайте вопрос по документам…" autocomplete="off"></textarea>
             <button type="submit" class="send-btn" aria-label="Отправить вопрос">${icon('send')}</button>
           </form>
-          <p class="hint">Enter — отправить · Shift+Enter — новая строка · ответы содержат только то, что есть в документах</p>
         </div></div>
       </section>`;
       root = main.querySelector('.chat-view');
@@ -395,16 +417,21 @@ export function chatView({ pickFiles }) {
       this.update(route, true);
     },
     update(route, first = false) {
-      const c = chatId ? getChat(chatId) : null;
+      let c = chatId ? getChat(chatId) : null;
       const inner = root.querySelector('#chatInner');
       const scroll = root.querySelector('#chatScroll');
+      const foreign = c && (c.role || 'staff') !== role();
+      if (foreign) c = null;
       if (chatId && !c) {
-        inner.innerHTML = `<div class="empty-card center"><h2>Диалог не найден</h2><p>Возможно, он был удалён или ссылка открыта в другом браузере: история хранится локально.</p><a class="btn btn-primary" href="#/">Начать новый диалог</a></div>`;
+        inner.innerHTML = foreign
+          ? `<div class="empty-card center">${icon('lock', 'lg')}<h2>Диалог другой роли</h2><p>Этот диалог вёл ${isContractor() ? 'сотрудник' : 'подрядчик'}. В текущей роли он недоступен — у ролей разные документы.</p><a class="btn btn-primary" href="#/">Новый диалог</a></div>`
+          : `<div class="empty-card center"><h2>Диалог не найден</h2><p>Возможно, он был удалён или ссылка открыта в другом браузере: история хранится локально.</p><a class="btn btn-primary" href="#/">Начать новый диалог</a></div>`;
         root.querySelector('.composer-wrap').hidden = true;
         return;
       }
       const html = !c || !c.messages.length ? startScreen(c)
         : `<header class="chat-title" data-k="${c.id}"><h1>${esc(c.title)}</h1><span class="muted">${fmtDate(c.createdAt)}</span></header>${c.messages.map((m) => messageHtml(c, m)).join('')}`;
+      root.classList.toggle('is-start', !c || !c.messages.length);
       if (html !== lastHtml) {
         const atBottom = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 80;
         const count = c?.messages.length || 0;

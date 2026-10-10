@@ -1,11 +1,11 @@
 // Раздел «Документы»: коллекции, список, поиск, фильтры, выбор, загрузка, корзина.
 // Также страница одного документа.
 
-import { state, liveDocs, doc as getDoc, collection, retryDocs, canRetry, moveDocs, trashDocs, restoreDocs, purgeDocs, createCollection, renameCollection, deleteCollection, loadDemo, replaceFile, commit } from './store.js';
+import { state, liveDocs, doc as getDoc, collection, retryDocs, canRetry, moveDocs, trashDocs, restoreDocs, purgeDocs, createCollection, renameCollection, deleteCollection, loadDemo, replaceFile, commit, visibleCollections, isContractor, canSee, setExternal } from './store.js';
 import { esc, icon, fmtSize, fmtDate, statusBadge, TYPE, toast, modal, confirmDialog, promptDialog, nDocs, plural, reveal } from './ui.js';
 import { docBody, scrollToHit } from './viewer.js';
 import { ACCEPT } from './ingest.js';
-import { lattice, fuseButton } from './fx.js';
+import { lattice, fuseButton, ring } from './fx.js';
 import { crumple, prewarm } from './crumple.js';
 
 const FILTERS = [
@@ -19,6 +19,8 @@ const FILTERS = [
 const demoNote = (d) => (d.demoKey === 'scan' && d.status === 'error'
   ? `<div class="doc-hint">${icon('info', 'xs')}Файл в демо-наборе нарочно: так выглядит ошибка чтения. Остальные документы ищутся как обычно.</div>` : '');
 
+// Имена файлов длинные и с подчёркиваниями: разрешаем перенос после «_», а не посреди слова.
+const wbr = (name) => esc(name).replace(/_/g, '_<wbr>');
 const colName = (id) => (id ? collection(id)?.name || 'Без коллекции' : 'Без коллекции');
 
 function docMeta(d) {
@@ -96,8 +98,11 @@ function statsHtml() {
   if (!live.length) return '';
   const ready = live.filter((d) => d.status === 'ready');
   const chunks = ready.reduce((n, d) => n + (d.chunks || 0), 0);
-  const stat = (key, label, n, tail = '') => `<span class="stat"><span>${label}</span><b data-cu="stat:${key}" data-to="${n}">${n}</b>${tail ? `<span>${tail}</span>` : ''}</span>`;
-  return stat('ready', 'Готовы к поиску', ready.length, `из ${live.length}`) + stat('chunks', 'Фрагментов в индексе', chunks) + stat('cols', 'Коллекций', state.collections.length);
+  const err = live.filter((d) => d.status === 'error').length;
+  const stat = (key, label, n) => `<span class="stat"><b data-cu="stat:${key}" data-to="${n}">${n}</b><span>${label}</span></span>`;
+  return ring({ key: 'docs', ready: ready.length, error: err, total: live.length, size: 46, width: 5 })
+    + `<span class="stat main"><b><span data-cu="stat:ready" data-to="${ready.length}">${ready.length}</span> из ${live.length}</b><span>готовы к поиску</span></span>`
+    + stat('chunks', plural(chunks, 'фрагмент', 'фрагмента', 'фрагментов'), chunks) + stat('cols', plural(visibleCollections().length, 'коллекция', 'коллекции', 'коллекций'), visibleCollections().length);
 }
 
 export function docsView({ pickFiles }) {
@@ -105,7 +110,7 @@ export function docsView({ pickFiles }) {
   const selected = new Set();
   const seen = new Set(); // строки и статусы, которые уже показаны (см. reveal)
 
-  const isTrash = () => route.col === 'trash';
+  const isTrash = () => route.col === 'trash' && !isContractor();
   const current = () => {
     let list = isTrash() ? state.docs.filter((d) => d.deletedAt) : liveDocs();
     if (!isTrash() && route.col && route.col !== 'all') list = list.filter((d) => (route.col === 'none' ? !d.collectionId : d.collectionId === route.col));
@@ -122,12 +127,12 @@ export function docsView({ pickFiles }) {
     const noCol = live.filter((d) => !d.collectionId).length;
     return `<ul class="col-list">
       ${item('#/docs', 'Все документы', live.length, !route.col || route.col === 'all', '', 'docs')}
-      ${state.collections.map((c) => item(`#/docs/${c.id}`, c.name, live.filter((d) => d.collectionId === c.id).length, route.col === c.id,
-        `<span class="col-tools"><button type="button" class="icon-btn btn-sm" data-act="rename-col" data-id="${c.id}" aria-label="Переименовать коллекцию ${esc(c.name)}">${icon('edit', 'sm')}</button><button type="button" class="icon-btn btn-sm" data-act="del-col" data-id="${c.id}" aria-label="Удалить коллекцию ${esc(c.name)}">${icon('trash', 'sm')}</button></span>`)).join('')}
+      ${visibleCollections().map((c) => item(`#/docs/${c.id}`, c.name, live.filter((d) => d.collectionId === c.id).length, route.col === c.id,
+        `${c.external && !isContractor() ? `<span class="col-ext" title="Открыта подрядчикам">${icon('eye', 'xs')}</span>` : ''}<span class="col-tools staff-only"><button type="button" class="icon-btn btn-sm" data-act="rename-col" data-id="${c.id}" aria-label="Переименовать коллекцию ${esc(c.name)}">${icon('edit', 'sm')}</button><button type="button" class="icon-btn btn-sm" data-act="del-col" data-id="${c.id}" aria-label="Удалить коллекцию ${esc(c.name)}">${icon('trash', 'sm')}</button></span>`)).join('')}
       ${noCol ? item('#/docs/none', 'Без коллекции', noCol, route.col === 'none') : ''}
     </ul>
-    <button type="button" class="btn btn-ghost btn-sm add-col" data-act="new-col">${icon('plus', 'sm')}Новая коллекция</button>
-    <ul class="col-list trash-link">${item('#/docs/trash', 'Корзина', state.docs.filter((d) => d.deletedAt).length, isTrash(), '', 'trash')}</ul>`;
+    <button type="button" class="btn btn-ghost btn-sm add-col staff-only" data-act="new-col">${icon('plus', 'sm')}Новая коллекция</button>
+    <ul class="col-list trash-link staff-only">${item('#/docs/trash', 'Корзина', state.docs.filter((d) => d.deletedAt).length, isTrash(), '', 'trash')}</ul>`;
   }
 
   function rowHtml(d, showCol) {
@@ -137,14 +142,14 @@ export function docsView({ pickFiles }) {
          <button type="button" class="icon-btn" data-act="purge" data-id="${d.id}" aria-label="Удалить навсегда ${esc(d.name)}" title="Удалить навсегда">${icon('trash')}</button>`
       : `${d.status === 'ready' ? `<button type="button" class="btn btn-sm btn-ghost hide-sm" data-act="ask" data-id="${d.id}">${icon('chat', 'sm')}Спросить</button>` : ''}
          ${d.status === 'error' ? (canRetry(d) ? `<button type="button" class="btn btn-sm btn-ghost" data-act="retry" data-id="${d.id}">${icon('refresh', 'sm')}Повторить</button>` : `<button type="button" class="btn btn-sm btn-ghost" data-act="replace" data-id="${d.id}">${icon('upload', 'sm')}Загрузить снова</button>`) : ''}
-         <button type="button" class="icon-btn" data-act="move" data-id="${d.id}" aria-label="Переместить ${esc(d.name)}" title="Переместить в коллекцию">${icon('move')}</button>
-         <button type="button" class="icon-btn" data-act="trash" data-id="${d.id}" aria-label="Удалить ${esc(d.name)}" title="В корзину">${icon('trash')}</button>`;
+         <button type="button" class="icon-btn staff-only" data-act="move" data-id="${d.id}" aria-label="Переместить ${esc(d.name)}" title="Переместить в коллекцию">${icon('move')}</button>
+         <button type="button" class="icon-btn staff-only" data-act="trash" data-id="${d.id}" aria-label="Удалить ${esc(d.name)}" title="В корзину">${icon('trash')}</button>`;
     return `<li class="doc-row ${sel ? 'sel' : ''} ${d.status === 'error' ? 'err' : ''} ${d.status === 'processing' ? 'proc' : ''}" data-k="${d.id}" style="--i:${Math.min(ri++, 12)}">
       <label class="cb"><input type="checkbox" data-sel="${d.id}" ${sel ? 'checked' : ''} aria-label="Выбрать ${esc(d.name)}"></label>
       <span class="ftype ft-${d.ext}" aria-hidden="true">${TYPE[d.ext] || (d.ext || '?').toUpperCase().slice(0, 4)}</span>
       <div class="doc-main">
-        ${isTrash() ? `<span class="doc-name">${esc(d.name)}</span>` : `<a class="doc-name" href="#/doc/${d.id}">${esc(d.name)}</a>`}
-        <div class="doc-meta">${showCol ? `${icon('folder', 'xs')}${esc(colName(d.collectionId))} · ` : ''}${isTrash() ? `удалён ${fmtDate(d.deletedAt)}` : docMeta(d)}</div>
+        ${isTrash() ? `<span class="doc-name">${wbr(d.name)}</span>` : `<a class="doc-name" href="#/doc/${d.id}">${wbr(d.name)}</a>`}
+        <div class="doc-meta">${showCol ? `${icon('folder', 'xs')}${esc(colName(d.collectionId))} · ` : ''}${isTrash() ? `удалён ${fmtDate(d.deletedAt)}` : d.status === 'queued' || d.status === 'processing' ? '<span class="sk-bar" aria-hidden="true"></span><span class="sk-bar short" aria-hidden="true"></span>' : docMeta(d)}</div>
         ${d.status === 'error' ? `<div class="doc-err">${esc(d.error)}</div>${demoNote(d)}` : ''}
       </div>
       <div class="doc-status" data-k="${d.id}:${d.status}">${statusBadge(d)}</div>
@@ -158,10 +163,11 @@ export function docsView({ pickFiles }) {
     const list = visible();
     if (!all.length) {
       if (isTrash()) return `<div class="empty-card center">${icon('trash', 'lg')}<h2>Корзина пуста</h2><p>Удалённые документы попадают сюда и не участвуют в поиске. Их можно восстановить.</p></div>`;
+      if (!liveDocs().length && isContractor()) return `<div class="empty-card center">${icon('lock', 'lg')}<h2>Документы ещё не открыты</h2><p>Подрядчик видит только коллекции, к которым ему дали доступ.</p></div>`;
       if (!liveDocs().length) return `<div class="empty-card center dropzone" data-act="pick">
           ${icon('upload', 'lg')}<h2>Добавьте первые документы</h2>
-          <p>Перетащите файлы сюда или выберите их на компьютере. Поддерживаются PDF (с текстовым слоем), DOCX, TXT и MD до 15 МБ.</p>
-          <div class="row-actions"><button type="button" class="btn btn-primary" data-act="pick">Выбрать файлы</button><span class="magnet" data-pad="50" data-k="4"><button type="button" class="btn btn-ghost" data-act="demo">Загрузить демо-набор</button></span></div></div>`;
+          <p>PDF с текстовым слоем, DOCX, TXT и MD до 15 МБ. Перетащите файлы сюда или выберите.</p>
+          <div class="row-actions"><button type="button" class="btn btn-primary" data-act="pick">Выбрать файлы</button><button type="button" class="btn btn-ghost" data-act="demo">Загрузить демо-набор</button></div></div>`;
       return `<div class="empty-card center">${icon('folder', 'lg')}<h2>В коллекции пока пусто</h2><p>Перетащите файлы сюда или переместите документы из других коллекций.</p><button type="button" class="btn btn-primary" data-act="pick">Добавить файлы</button></div>`;
     }
     if (!list.length) {
@@ -170,7 +176,7 @@ export function docsView({ pickFiles }) {
     const allSel = list.every((d) => selected.has(d.id));
     const head = `<div class="list-head"><label class="cb"><input type="checkbox" data-act="sel-all" ${allSel ? 'checked' : ''} aria-label="Выбрать все показанные документы"></label><span>${nDocs(list.length)}${list.length !== all.length ? ` из ${all.length}` : ''}</span></div>`;
     if ((!route.col || route.col === 'all') && !isTrash()) {
-      const groups = [...state.collections.map((c) => [c.id, c.name]), [null, 'Без коллекции']]
+      const groups = [...visibleCollections().map((c) => [c.id, c.name]), [null, 'Без коллекции']]
         .map(([id, name]) => [name, list.filter((d) => (d.collectionId || null) === id)]).filter(([, l]) => l.length);
       return head + groups.map(([name, l]) => `<section class="group"><h3 class="group-h">${icon('folder', 'sm')}${esc(name)} <span class="count">${l.length}</span></h3><ul class="doc-list">${l.map((d) => rowHtml(d, false)).join('')}</ul></section>`).join('');
     }
@@ -186,8 +192,8 @@ export function docsView({ pickFiles }) {
       ${isTrash() ? `<button type="button" class="btn btn-sm btn-ghost" data-act="bulk-restore">${icon('restore', 'sm')}Восстановить</button><button type="button" class="btn btn-sm btn-danger" data-act="bulk-purge">Удалить навсегда</button>`
         : `${readyIds.length ? `<button type="button" class="btn btn-sm btn-primary" data-act="bulk-ask">${icon('chat', 'sm')}Спросить по выбранным${readyIds.length !== ids.length ? ` (${readyIds.length})` : ''}</button>` : ''}
         ${errIds.length ? `<button type="button" class="btn btn-sm btn-ghost" data-act="bulk-retry">${icon('refresh', 'sm')}Повторить обработку</button>` : ''}
-        <button type="button" class="btn btn-sm btn-ghost" data-act="bulk-move">${icon('move', 'sm')}Переместить</button>
-        <button type="button" class="btn btn-sm btn-ghost" data-act="bulk-trash">${icon('trash', 'sm')}В корзину</button>`}
+        <button type="button" class="btn btn-sm btn-ghost staff-only" data-act="bulk-move">${icon('move', 'sm')}Переместить</button>
+        <button type="button" class="btn btn-sm btn-ghost staff-only" data-act="bulk-trash">${icon('trash', 'sm')}В корзину</button>`}
       <button type="button" class="icon-btn btn-sm" data-act="unselect" aria-label="Снять выбор">${icon('x')}</button></div>`;
   }
 
@@ -212,12 +218,13 @@ export function docsView({ pickFiles }) {
 
   async function onClick(e) {
     const t = e.target.closest('[data-act],[data-filter]');
-    if (!t) return;
+    if (!t || (t.matches('input[data-act=ext]') && e.type !== 'change')) return;
     if (t.dataset.filter) { filter = t.dataset.filter; return render(); }
     const id = t.dataset.id;
     const ids = [...selected];
     switch (t.dataset.act) {
       case 'pick': return pickFiles(targetCol());
+      case 'ext': { const c = collection(id); setExternal(id, t.checked); toast(t.checked ? `«${c.name}» открыта подрядчикам: они видят её документы и ищут по ним.` : `«${c.name}» закрыта для подрядчиков.`); return; }
       case 'demo': { const n = loadDemo(); toast(n ? `Добавлено ${nDocs(n)} демо-набора — идёт обработка.` : 'Демо-набор уже загружен.'); return; }
       case 'clear': q = ''; filter = 'all'; root.querySelector('#docSearch').value = ''; return render();
       case 'show-errors': filter = 'error'; return render();
@@ -254,6 +261,7 @@ export function docsView({ pickFiles }) {
   }
 
   function onChange(e) {
+    if (e.target.matches('[data-act=ext]')) return onClick(e);
     const cb = e.target.closest('[data-sel]');
     if (cb) { cb.checked ? selected.add(cb.dataset.sel) : selected.delete(cb.dataset.sel); render(); }
   }
@@ -268,6 +276,9 @@ export function docsView({ pickFiles }) {
     } else root.querySelector('#docList').innerHTML = listHtml();
     reveal(root.querySelector('#docList'), seen);
     root.querySelector('#docTitle').textContent = isTrash() ? 'Корзина' : c ? c.name : route.col === 'none' ? 'Без коллекции' : 'Все документы';
+    const access = c && !isContractor() ? `<label class="switch"><input type="checkbox" role="switch" data-act="ext" data-id="${c.id}" ${c.external ? 'checked' : ''}><span class="sw" aria-hidden="true"></span>Открыта подрядчикам</label>` : '';
+    const ax = root.querySelector('#access');
+    if (ax._html !== access) { ax.innerHTML = access; ax._html = access; }
     root.querySelector('#cols').innerHTML = colsHtml();
     const st = statsHtml();
     if (root._stats !== st) { root.querySelector('#stats').innerHTML = st; root._stats = st; }
@@ -275,7 +286,7 @@ export function docsView({ pickFiles }) {
     root.querySelector('#bulk').innerHTML = bulkHtml();
     root.querySelector('#headActions').innerHTML = isTrash()
       ? (state.docs.some((d) => d.deletedAt) ? `<button type="button" class="btn btn-ghost" data-act="empty-trash">${icon('trash', 'sm')}Очистить корзину</button>` : '')
-      : `<button type="button" class="btn btn-primary" data-act="pick">${icon('upload', 'sm')}Добавить файлы</button>`;
+      : isContractor() ? '' : `<button type="button" class="btn btn-primary" data-act="pick">${icon('upload', 'sm')}Добавить файлы</button>`;
     root.querySelector('.toolbar').hidden = !current().length;
     toolbarCounts();
   }
@@ -286,7 +297,7 @@ export function docsView({ pickFiles }) {
       if (!FILTERS.some((f) => f.id === filter)) filter = 'all';
       main.innerHTML = `<section class="docs-view">
         <header class="view-head">
-          <div><p class="eyebrow">Документы</p><h1 id="docTitle"></h1><p class="sub">Агент отвечает только по документам со статусом «Готов к поиску». Коллекция — это и папка, и область поиска в чате.</p><div class="stats" id="stats"></div></div>
+          <div class="vh-main"><h1 id="docTitle"></h1><div id="access"></div><div class="stats" id="stats"></div></div>
           <div class="head-actions" id="headActions"></div>
         </header>
         <div class="docs-layout">
@@ -301,6 +312,7 @@ export function docsView({ pickFiles }) {
             <div id="docList"></div>
           </div>
         </div>
+        <button type="button" class="fab staff-only" data-act="pick" aria-label="Добавить файлы">${icon('plus')}</button>
       </section>`;
       root = main.querySelector('.docs-view');
       root.querySelector('#docSearch').addEventListener('input', (e) => { q = e.target.value.trim(); render(); });
@@ -348,6 +360,7 @@ export function docPage() {
       const from = route.query.get('from');
       const back = from ? `<a class="back-link" href="#/c/${esc(from)}">${icon('back', 'sm')}Вернуться к диалогу</a>` : `<a class="back-link" href="#/docs${d?.collectionId ? '/' + d.collectionId : ''}">${icon('back', 'sm')}К документам</a>`;
       if (!d) { root.innerHTML = `${back}<div class="empty-card center"><h2>Документ не найден</h2><p>Он удалён навсегда или ссылка открыта в другом браузере: документы хранятся локально.</p></div>`; return; }
+      if (!canSee(d)) { root.innerHTML = `${back}<div class="empty-card center">${icon('lock', 'lg')}<h2>Документ недоступен</h2><p>Он лежит в коллекции, закрытой для подрядчиков.</p></div>`; this.last = ''; return; }
       const hl = route.query.get('q') ? { blockIndex: Number(route.query.get('b')), quote: route.query.get('q') } : null;
       let content = '';
       if (d.status === 'ready') {
@@ -361,17 +374,16 @@ export function docPage() {
       const html = `${back}
         <header class="doc-head">
           <span class="ftype ft-${d.ext} lg" aria-hidden="true">${TYPE[d.ext] || '?'}</span>
-          <div class="doc-head-main"><h1>${esc(d.name)}</h1>
+          <div class="doc-head-main"><h1>${wbr(d.name)}</h1>
             <div class="doc-facts">${statusBadge(d)}<span>${icon('folder', 'xs')}${esc(colName(d.collectionId))}</span><span>${docMeta(d)}</span>${d.deletedAt ? '<span class="status st-error">В корзине</span>' : ''}</div>
           </div>
           <div class="head-actions">
             ${d.deletedAt && !holding ? `<button type="button" class="btn btn-primary" data-act="restore">${icon('restore', 'sm')}Восстановить</button>`
               : `${d.status === 'ready' ? `<button type="button" class="btn btn-primary" data-act="ask">${icon('chat', 'sm')}Спросить по документу</button>` : ''}
-              <button type="button" class="btn btn-ghost" data-act="move">${icon('move', 'sm')}Переместить</button>
-              <span data-fuse></span>`}
+              ${isContractor() ? '' : `<button type="button" class="btn btn-ghost" data-act="move">${icon('move', 'sm')}Переместить</button><span data-fuse></span>`}`}
           </div>
         </header>
-        ${d.status === 'ready' ? `<p class="doc-note">${icon('info', 'xs')}Ниже — текст, извлечённый из файла: именно по нему ищет агент. ${d.pages ? 'Номера страниц соответствуют страницам PDF.' : 'В DOCX/TXT нет страниц, поэтому ориентиром служат разделы.'}</p>` : ''}
+        ${d.status === 'ready' ? `<p class="doc-note">${icon('info', 'xs')}Текст, по которому ищет агент. Выделите фрагмент, чтобы спросить о нём.</p>` : ''}
         ${content}`;
       if (html !== this.last) {
         root.innerHTML = html;

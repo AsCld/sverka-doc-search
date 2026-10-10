@@ -2,32 +2,68 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <title>Сверка — поиск по документам</title>
   <meta name="description" content="Прототип ИИ-агента для поиска по документам: ответ с цитатами и проверкой по источнику.">
-  <meta name="theme-color" content="#f3f5fa">
-  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#f2f4f9">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Сверка">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
+  <link rel="preload" href="icons/splash-icon.webp" as="image" type="image/webp">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="css/app.css">
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
+  <!-- Заставка из логотипа: один раз за вкладку; при «уменьшить движение» не показывается; клики не перехватывает.
+       Знак, название и подпись — отдельные слои (нарезка tools/splash_assets.py), чтобы анимировать их по очереди. -->
+  <div class="splash" id="splash" aria-hidden="true">
+    <div class="splash-bg"></div>
+    <div class="splash-stage">
+      <img class="sp-icon" src="icons/splash-icon.webp" alt="" decoding="async">
+      <span class="sp-sheen"></span>
+      <img class="sp-title" src="icons/splash-title.webp" alt="" decoding="async">
+      <img class="sp-sub" src="icons/splash-sub.webp" alt="" decoding="async">
+    </div>
+  </div>
+  <script>
+    (function () {
+      var s = document.getElementById('splash');
+      try { if (sessionStorage.getItem('sverka.splash') || matchMedia('(prefers-reduced-motion: reduce)').matches) { s.remove(); return; } sessionStorage.setItem('sverka.splash', '1'); }
+      catch (e) { s.remove(); return; }
+      // Анимация стартует, когда картинки декодированы (не дольше 700 мс), — иначе она проиграется на пустом месте.
+      window.__splash = new Promise(function (done) {
+        var go = function () { if (s.classList.contains('go')) return; s.classList.add('go'); done(performance.now()); };
+        Promise.all([].map.call(s.querySelectorAll('img'), function (i) { return i.decode().catch(function () {}); })).then(go);
+        setTimeout(go, 700);
+      });
+    })();
+  </script>
+
   <a class="skip" href="#main">Перейти к содержимому</a>
   <div class="app">
-    <aside class="sidebar" id="sidebar" aria-label="Навигация"></aside>
-    <div class="scrim" id="scrim" hidden></div>
+    <aside class="sidebar" id="sidebar" aria-label="Навигация">
+      <div class="side-main" id="sideMain"></div>
+      <div class="side-foot">
+        <div class="role-seg" role="radiogroup" aria-label="Роль в демо"><span class="seg-ind" aria-hidden="true"></span><button type="button" role="radio" data-role="staff">Сотрудник</button><button type="button" role="radio" data-role="contractor">Подрядчик</button></div>
+        <small class="role-note" id="roleNote"></small>
+        <button type="button" class="link-btn" data-act="about"><svg class="ic sm" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>О прототипе</button>
+      </div>
+    </aside>
     <div class="main-col">
-      <header class="topbar">
-        <button type="button" class="icon-btn" id="menuBtn" aria-label="Открыть меню"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-        <a href="#/" class="brand-link"><span class="logo-mark" aria-hidden="true"></span><span class="brand-name">Сверка</span></a>
-        <a href="#/" class="icon-btn" aria-label="Новый диалог"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></a>
-      </header>
+      <header class="topbar" id="topbar"></header>
       <p class="storage-err" id="storageErr" role="alert" hidden></p>
       <main id="main" tabindex="-1">
         <noscript><p class="page-pad">Для работы прототипа включите JavaScript.</p></noscript>
       </main>
+      <nav class="tabbar" id="tabbar" aria-label="Разделы"></nav>
     </div>
+    <div class="scrim" id="scrim" hidden></div>
     <aside class="panel" id="panel" aria-label="Источник ответа" hidden></aside>
   </div>
+  <button type="button" class="sel-ask" id="selAsk" hidden><svg class="ic sm" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></svg>Спросить об этом</button>
   <div class="drop-overlay" id="drop" hidden>
     <div class="drop-box"><svg class="ic lg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
       <b>Отпустите файлы, чтобы добавить</b><span data-target></span><small>PDF, DOCX, TXT, MD · до 15 МБ</small></div>

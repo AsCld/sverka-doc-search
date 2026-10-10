@@ -47,8 +47,9 @@ async function ask(q) {
 await step('Первый запуск: пустое состояние и объяснение назначения', async () => {
   await page.goto(BASE);
   await page.waitForSelector('.start');
-  assert.match(await text('.start-hero h1'), /ответ в документах/i);
+  assert.match(await text('.kb-card'), /Документов пока нет/);
   assert.ok(await page.isVisible('[data-act=demo]'));
+  await page.waitForSelector('#splash', { state: 'detached', timeout: 5000 }); // заставка уходит сама и не держит клики
   assert.ok(await page.isDisabled('.send-btn'));
   await shot('01-first-run');
   await page.goto(BASE + '#/docs');
@@ -146,7 +147,7 @@ await step('Поиск без подготовленного ответа (об�
   await ask('Сколько единиц техники в ремонте?');
   const a = await lastAnswer().innerText();
   assert.match(a, /7 единиц в ремонте/);
-  assert.match(a, /Отчёт_о_ходе_работ/);
+  assert.match(a, /Отчёт о ходе работ/);
 });
 
 await step('Ответ модели: цитаты сверяются с документом, выдуманная цитата — запасной режим', async () => {
@@ -294,22 +295,33 @@ await step('Узкий экран (390 px): нет горизонтальной 
   const overflow = async () => m.evaluate(() => document.documentElement.scrollWidth - innerWidth);
   assert.ok(await overflow() <= 0, 'горизонтальная прокрутка в чате');
   await shot('m1-chat', m);
+  assert.ok(await m.isHidden('#tabbar'), 'в диалоге вкладки спрятаны');
+  // Лист источника: сначала только цитата, «Показать в документе» — весь текст, вниз за шапку — назад и закрыть.
   await m.locator('.cite').first().click();
-  await m.waitForSelector('#panel .back-btn');
+  await m.waitForSelector('#panel[data-detent=peek] .panel-quote');
+  await m.waitForTimeout(600);
   await shot('m2-source', m);
-  await m.click('#panel .back-btn');
+  await m.click('#panel .pq-expand');
+  await m.waitForSelector('#panel[data-detent=full]');
+  await m.waitForTimeout(600);
+  await shot('m3-source-full', m);
+  const drag = async (dy) => { const b = await m.locator('#panel .panel-title').boundingBox(); await m.mouse.move(b.x + 20, b.y + 10); await m.mouse.down(); await m.mouse.move(b.x + 20, b.y + 10 + dy / 2); await m.mouse.move(b.x + 20, b.y + 10 + dy); await m.mouse.up(); };
+  await drag(120);
+  await m.waitForSelector('#panel[data-detent=peek]');
+  await m.waitForTimeout(500);
+  await drag(160);
   await m.waitForSelector('#panel', { state: 'hidden' });
-  await m.click('#menuBtn');
-  await m.waitForSelector('body.drawer-open');
-  await m.waitForTimeout(300);
-  await shot('m3-menu', m);
-  await m.click('#sidebar a:has-text("Документы")');
+  assert.doesNotMatch(m.url(), /src=/);
+  await m.click('.topbar .tb-back');
+  await m.waitForSelector('.hist-list li');
+  assert.ok(await m.locator('.hist-list li').count() >= 2);
+  await m.click('#tabbar [data-tab=docs]');
   await m.waitForSelector('.doc-row');
   await m.waitForTimeout(300);
   assert.ok(await overflow() <= 0, 'горизонтальная прокрутка в документах');
   await shot('m4-docs', m);
-  await m.goto(BASE + '#/');
-  await m.waitForSelector('.start');
+  await m.click('#tabbar [data-tab=chat]');
+  await m.waitForSelector('.start .example');
   await shot('m5-start', m);
   await m.close();
 });
@@ -326,6 +338,62 @@ await step('Клавиатура: «/» фокусирует поле вопро
   await page.waitForFunction(() => document.querySelector('.msg.agent') && !document.querySelector('.thinking'));
   assert.match(await lastAnswer().innerText(), /Морозова Ирина Викторовна/);
   await shot('08-keyboard-answer');
+});
+
+await step('Вопрос по выделенному фрагменту документа', async () => {
+  await page.goto(BASE + '#/docs');
+  await page.click('a.doc-name:has-text("Регламент")');
+  await page.waitForSelector('.doc-text p');
+  await page.evaluate(() => { const p = [...document.querySelectorAll('.doc-text p')].find((x) => x.textContent.includes('рабочих дня')); const r = document.createRange(); r.selectNodeContents(p); getSelection().removeAllRanges(); getSelection().addRange(r); });
+  await page.waitForSelector('#selAsk:not([hidden])');
+  await page.click('#selAsk');
+  await page.waitForSelector('.start');
+  assert.match(await page.inputValue('#q'), /^Поясни фрагмент: «.*рабочих дня/);
+  await waitText('.scope-chip', /Регламент/);
+  await page.fill('#q', '');
+});
+
+await step('Роль «Подрядчик»: видна только своя коллекция, закрытое не подсказывается', async () => {
+  await page.goto(BASE + '#/');
+  await page.click('.role-seg [data-role=contractor]');
+  await page.waitForFunction(() => document.body.classList.contains('contractor'));
+  await page.goto(BASE + '#/docs');
+  await page.waitForSelector('.doc-row');
+  assert.equal(await page.locator('.doc-row').count(), 1);
+  assert.match(await text('.doc-row'), /Памятка/);
+  assert.equal(await page.locator('.doc-row [data-act=trash]:visible, #headActions [data-act=pick]').count(), 0);
+  await page.goto(BASE + '#/');
+  await page.waitForSelector('.example');
+  assert.match(await text('.examples'), /исполнительную документацию/);
+  assert.equal(await page.locator('#sidebar .history li').count(), 0, 'диалоги сотрудника скрыты');
+  await page.click('.example:has-text("Закрыто для роли")');
+  await page.waitForSelector('.msg.agent .ans-head');
+  let a = await lastAnswer().innerText();
+  assert.match(a, /Нет в документах/);
+  assert.equal(await lastAnswer().locator('.outside').count(), 0, 'нельзя подсказывать закрытые документы');
+  assert.doesNotMatch(a, /Протокол/);
+  await ask('До какого числа сдавать исполнительную документацию?');
+  assert.match(await lastAnswer().innerText(), /25-го числа/);
+  await shot('09-contractor');
+});
+
+await step('Роль «Сотрудник»: доступ коллекции и метка «можно переслать подрядчику»', async () => {
+  await page.click('.role-seg [data-role=staff]');
+  await page.waitForFunction(() => !document.body.classList.contains('contractor'));
+  await page.goto(BASE + '#/');
+  await page.waitForSelector('.start');
+  await ask('До какого числа сдавать исполнительную документацию?');
+  assert.match(await lastAnswer().locator('.aud').innerText(), /Можно переслать подрядчику/);
+  await ask('Какой срок бетонирования опор моста через Тьму?');
+  assert.match(await lastAnswer().locator('.aud').innerText(), /Только для сотрудников/);
+  const col = await page.evaluate(() => JSON.parse(localStorage.getItem('sverka.v1')).collections.find((c) => c.name === 'Снабжение').id);
+  await page.goto(BASE + '#/docs/' + col);
+  await page.click('label.switch');
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem('sverka.v1')).collections.find((c) => c.name === 'Снабжение').external === true);
+  await page.click('.role-seg [data-role=contractor]');
+  await page.goto(BASE + '#/docs');
+  await page.waitForFunction(() => document.querySelectorAll('.doc-row').length === 3);
+  await page.click('.role-seg [data-role=staff]');
 });
 
 assert.deepEqual(errors, [], 'ошибки в консоли');

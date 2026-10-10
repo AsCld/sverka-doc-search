@@ -79,13 +79,42 @@ function syncCount(el) {
   el.textContent = cuFmt(s.v, s.dec);
 }
 
-// Новые узлы с решёткой или счётчиком обрабатываются до отрисовки кадра (MutationObserver — микрозадача).
+/* По мотивам https://animata.design/docs/graphs/donut-chart (MIT): кольцо прогресса со скруглённой дугой.
+   Здесь — готовность базы к поиску: синяя дуга — готовые документы, красная — ошибки чтения, остаток — в обработке.
+   Перерисовка вида не сбрасывает дугу: новое кольцо стартует с прошлого значения и доезжает до нового (transition). */
+const RING = new Map();
+export function ring({ key, ready = 0, error = 0, total = 0, size = 64, width = 7, center = '' }) {
+  const r = (size - width) / 2, c = size / 2;
+  const p = total ? (ready / total) * 100 : 0, e = total ? (error / total) * 100 : 0;
+  const arc = (cls, v, off = 0) => `<circle class="${cls}" cx="${c}" cy="${c}" r="${r}" pathLength="100" stroke-width="${width}" data-to="${v.toFixed(2)}" data-off="${off.toFixed(2)}" style="stroke-dasharray:0 100"/>`;
+  return `<span class="ring${total ? '' : ' empty'}" data-ring="${key}" style="--size:${size}px" role="img" aria-label="Готово к поиску ${ready} из ${total}">`
+    + `<svg viewBox="0 0 ${size} ${size}" aria-hidden="true"><circle class="ring-track" cx="${c}" cy="${c}" r="${r}" stroke-width="${width}"/>${arc('ring-bar', p)}${e ? arc('ring-err', e, p) : ''}</svg>`
+    + (center ? `<span class="ring-c" aria-hidden="true">${center}</span>` : '') + '</span>';
+}
+function syncRing(el) {
+  const last = RING.get(el.dataset.ring) || {};
+  const next = {};
+  for (const arc of el.querySelectorAll('[data-to]')) {
+    const cls = arc.getAttribute('class'), to = Number(arc.dataset.to), off = Number(arc.dataset.off);
+    const from = last[cls] ?? { to: 0, off };
+    const set = (v, o) => { arc.style.strokeDasharray = `${v} ${100 - v}`; arc.style.strokeDashoffset = String(-o); };
+    set(from.to, from.off);
+    next[cls] = { to, off };
+    if (reduce() || (from.to === to && from.off === off)) set(to, off);
+    else requestAnimationFrame(() => requestAnimationFrame(() => set(to, off)));
+  }
+  RING.set(el.dataset.ring, next);
+}
+
+// Новые узлы с решёткой, счётчиком или кольцом обрабатываются до отрисовки кадра (MutationObserver — микрозадача).
 function scan(node) {
   if (node.nodeType !== 1) return;
   if (node.matches('.lattice')) syncLattice(node);
   if (node.matches('[data-cu]')) syncCount(node);
+  if (node.matches('[data-ring]')) syncRing(node);
   node.querySelectorAll('.lattice').forEach(syncLattice);
   node.querySelectorAll('[data-cu]').forEach(syncCount);
+  node.querySelectorAll('[data-ring]').forEach(syncRing);
 }
 
 /* Порт: https://reactbits.dev/components/spotlight-card · MIT + Commons Clause · © React Bits
@@ -154,31 +183,6 @@ function initSpotlight(selector) {
   document.addEventListener('focusin', (e) => { if (e.target.matches?.(':focus-visible')) { focus = e.target; wake(); } });
   document.addEventListener('focusout', () => { focus = null; wake(); });
 }
-
-/* Порт: https://reactbits.dev/animations/magnet · MIT + Commons Clause · © React Bits
-   <span class="magnet" data-pad="60" data-k="4"><button>…</button></span>: внешний элемент меряем,
-   внутренний смещаем на (курсор − центр) / k. Переходы — как в оригинале. На тач-экранах выключено. */
-function initMagnet() {
-  if (!fine()) return;
-  addEventListener('mousemove', (e) => {
-    if (reduce()) return;
-    for (const w of document.querySelectorAll('.magnet')) {
-      const inner = w.firstElementChild;
-      if (!inner) continue;
-      const pad = Number(w.dataset.pad || 100), k = Number(w.dataset.k || 2);
-      const { left, top, width, height } = w.getBoundingClientRect();
-      const cx = left + width / 2, cy = top + height / 2;
-      const on = Math.abs(cx - e.clientX) < width / 2 + pad && Math.abs(cy - e.clientY) < height / 2 + pad;
-      inner.style.transition = on ? 'transform 0.3s ease-out' : 'transform 0.5s ease-in-out';
-      inner.style.transform = on ? `translate3d(${(e.clientX - cx) / k}px, ${(e.clientY - cy) / k}px, 0)` : 'translate3d(0, 0, 0)';
-    }
-  }, { passive: true });
-}
-
-/* Порт: https://reactbits.dev/text-animations/blur-text · MIT + Commons Clause · © React Bits
-   Слова проявляются из размытия по очереди; ключевые кадры — в css/app.css (@keyframes blur-word).
-   Возвращает HTML: каждое слово — inline-block с индексом --w для задержки. */
-export const blurWords = (text, from = 0) => text.split(' ').map((w, i) => `<span class="bw" style="--w:${from + i}">${esc(w)}</span>`).join(' ');
 
 /* Порт: https://reactbits.dev/micro/fuse-button · MIT + Commons Clause · © React Bits
    Кнопка действия, которая сама несёт отмену: нажали → подпись меняется на «Отменить», по контуру горит
@@ -305,5 +309,4 @@ export function initFx() {
   new MutationObserver((list) => { for (const m of list) m.addedNodes.forEach(scan); }).observe(document.body, { childList: true, subtree: true });
   scan(document.body);
   initSpotlight('.spot');
-  initMagnet();
 }
