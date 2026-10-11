@@ -141,6 +141,8 @@ export default async function handler(req, res) {
       return res.status(r.status === 429 ? 429 : 502).json({ error: r.status === 429 ? 'rate_limit' : 'model_error', detail: s(r.json.message, 300) });
     }
     const choice = r.json.choices?.[0] || {};
+    // Фильтр содержания GigaChat: модель отказалась отвечать по этим фрагментам (сессия 9 — медиамониторинг, стратегии).
+    if (choice.finish_reason === 'blacklist') return res.status(502).json({ error: 'model_filter', detail: 'GigaChat отказался отвечать: сработал фильтр содержания модели' });
     let out = choice.message?.function_call?.arguments ?? choice.message?.content ?? '';
     if (typeof out === 'string') {
       const raw = out.replace(/^```(?:json)?\s*|\s*```$/g, '');
