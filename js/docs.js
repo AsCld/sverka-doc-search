@@ -388,7 +388,7 @@ export function docPage() {
         root.innerHTML = html;
         this.last = html;
         root.querySelector('[data-fuse]')?.replaceWith(this.fuse(d));
-        if (first && hl) requestAnimationFrame(() => scrollToHit(root));
+        if (first && hl) requestAnimationFrame(() => scrollToHit(root, d.blocks[hl.blockIndex]?.n));
       }
     },
   };

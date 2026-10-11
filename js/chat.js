@@ -173,14 +173,15 @@ function startScreen(c) {
     return `<div class="start" data-k="start">${hero()}<div class="kb-card empty" style="--i:1">${ring({ key: 'home', total: 0, size: 58, width: 6 })}<span class="kb-text">${body}</span></div>
       ${isContractor() ? '' : `<div class="start-actions" style="--i:2"><button type="button" class="btn btn-primary" data-act="demo">${icon('upload', 'sm')}Загрузить демо-набор</button><button type="button" class="btn btn-ghost" data-act="pick">Свои файлы</button></div>`}</div>`;
   }
-  const list = isContractor() ? EXAMPLES_EXT : EXAMPLES;
+  // Примеры — вопросы к демо-набору: при одних своих документах они не к месту (сессия 9).
+  const list = !all.some((d) => d.demoKey) ? [] : isContractor() ? EXAMPLES_EXT : EXAMPLES;
   const examples = list.map((e, i) => `<button type="button" class="example spot" style="--i:${i + 3}; --hue:${e.hue}" data-ask="${esc(e.q)}" ${inf.ready.length ? '' : 'disabled'}>
       <span class="ex-tile" aria-hidden="true">${icon(e.icon)}</span><span class="ex-kind">${esc(e.kind)}</span><span class="ex-q">${esc(e.q)}</span></button>`).join('');
   return `<div class="start" data-k="start">
     ${hero()}
     ${kbCard()}
-    <h2 class="ex-title" style="--i:2">${inf.ready.length ? 'С чего начать' : 'Вопросы станут доступны после обработки'}</h2>
-    <div class="examples">${examples}</div>
+    ${list.length ? `<h2 class="ex-title" style="--i:2">${inf.ready.length ? 'С чего начать' : 'Вопросы станут доступны после обработки'}</h2>
+    <div class="examples">${examples}</div>` : ''}
   </div>`;
 }
 

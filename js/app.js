@@ -327,7 +327,7 @@ function renderPanel() {
     if (!wasOpen) { setDetent('peek'); panel.classList.remove('opened'); void panel.offsetWidth; panel.classList.add('opened'); }
     requestAnimationFrame(() => {
       measurePeek();
-      scrollToHit(panel.querySelector('.panel-body') || panel);
+      scrollToHit(panel.querySelector('.panel-body') || panel, found?.s?.page);
       if (!wasOpen) panel.querySelector('.close-x, .panel-head .icon-btn')?.focus({ preventScroll: true });
     });
   }

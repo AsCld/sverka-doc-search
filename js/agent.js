@@ -103,7 +103,7 @@ function originalWords(question, stems) {
 
 function sourceFromChunk(n, chunk, docs, quote) {
   const doc = docs.find((d) => d.id === chunk.docId);
-  return { n, docId: doc.id, docName: doc.name, page: chunk.page, section: chunk.section, blockIndex: chunk.pageIndex, quote };
+  return { n, docId: doc.id, docName: doc.name, page: chunk.page, section: chunk.section, para: chunk.para, blockIndex: chunk.pageIndex, quote };
 }
 
 // Поиск фрагментов в области. Контекст прошлого вопроса подмешиваем, только если вопрос
@@ -248,12 +248,17 @@ function toBlocks(text) {
 // так ловится самая частая выдумка модели. Не прошла хоть одна проверка — ответ отклоняется.
 // Лишние ссылки (во фрагменте нет ни одного ключевого факта утверждения) убираются, если остаются другие.
 export function verifyModel(res, frags, docs) {
-  let text = String(res.answer || '').replace(/\\n/g, '\n') // модель иногда экранирует переводы строк дважды
+  let text = String(res.answer || '').replace(/\\n/g, '\n').replace(/\\"/g, '"') // модель иногда экранирует переводы строк и кавычки дважды
     .replace(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*(?:[:=[][\s\S]*)?$/, '') // протёкший в текст JSON, в т. ч. голое «quotes» в конце
     .trim().replace(/["'\s,]+$/, '') // хвост JSON, который иногда оставляет модель
     .replace(/^(\s*[-•]\s+)\*\*([^*\n]+)\*\*\s*$/gm, '$1$2') // пункт списка целиком жирным — шум
     .replace(/\]\s*,\s*\[/g, '][')
     .replace(/\[(\d+(?:\s*,\s*\d+)+)\]/g, (_, l) => l.split(/\s*,\s*/).map((n) => `[${n}]`).join(''));
+  // Цитаты, продублированные в тексте («Цитата: …», «**«…»**»), и вопросы-подсказки без ссылок убираем:
+  // цитаты показываются под ответом, подсказки — кнопками.
+  text = text.split('\n').filter((l) => !/^\s*(?:[-*•]\s*)?(?:\*\*)?Цитат[аы]?\s*:/i.test(l)
+    && !/^\s*\*\*\s*[«"].*[»"]\s*\*\*[\s.\d[\]]*$/.test(l)
+    && !(/\?\s*$/.test(l) && !/\[\d+\]/.test(l))).join('\n');
   const refs = (s) => [...new Set([...s.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]))];
   if (!refs(text).length) return { failed: 'в ответе нет ссылок на фрагменты' };
   if (refs(text).some((n) => !frags[n - 1])) return { failed: 'ссылка на несуществующий фрагмент' };
@@ -316,7 +321,10 @@ const facts = (s) => [...new Set((s.match(FACT_RE) || []).map((f) => low(/^\d/.t
 const hasFact = (s, fs) => { const t = low(s); return fs.some((f) => t.includes(f)); };
 
 const plainAnswer = (a) => a.blocks.map((b) => b.text || (b.items || []).map((x) => x.text || x).join('; ')).join(' ');
-const where = (c) => [c.page && `стр. ${c.page}`, c.section].filter(Boolean).join(', ') || 'начало документа';
+const where = (c) => [c.page && `стр. ${c.page}`, c.section].filter(Boolean).join(', ') || (c.para ? `абзац ${c.para}` : 'начало документа');
+
+// Сокращения раскрываем для модели: на «ВСМ» без расшифровки GigaChat-2-Max зацикливался (сессия 9).
+const forModel = (q) => q.replace(/(?<![а-яё])всм(?![а-яё])/gi, '$& (высокоскоростная магистраль)');
 
 // onFound({ n, docs }) — сколько фрагментов и из каких документов уйдёт в модель (для экрана «ищу ответ»).
 export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
@@ -341,7 +349,7 @@ export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
       body: JSON.stringify({
         // Уточнение («А кто за это отвечает?») сам по себе модель понимает слишком широко и перечисляет всех подряд —
         // называем предмет явно.
-        question: context ? `${question} (уточнение к вопросу «${context}»)` : question,
+        question: forModel(context ? `${question} (уточнение к вопросу «${context}»)` : question),
         history: history.flatMap((m, i) => (m.role === 'user' && history[i + 1]?.answer ? [{ q: m.text, a: plainAnswer(history[i + 1].answer) }] : [])).slice(-2),
         fragments: frags.map((c) => ({ doc: docs.find((d) => d.id === c.docId).name, where: where(c), text: c.text })),
       }),

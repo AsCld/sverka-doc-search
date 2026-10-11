@@ -76,7 +76,7 @@ export function anchor(s) {
   const parts = [];
   if (s.page) parts.push(`стр. ${s.page}`);
   if (s.section) parts.push(s.page ? s.section : `раздел «${s.section}»`);
-  return parts.join(' · ') || 'начало документа';
+  return parts.join(' · ') || (s.para ? `абзац ${s.para}` : 'начало документа');
 }
 
 export const TYPE = { pdf: 'PDF', docx: 'DOCX', txt: 'TXT', md: 'MD' };

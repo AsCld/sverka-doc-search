@@ -4,7 +4,8 @@
 const STOP = new Set(`а без более бы был была были было быть в вам вас весь во вот все всего всех вы где да даже для до его ее если есть еще же за здесь и из или им их к как ко когда кто ли либо мне может мы на надо наш не него нее нет ни них но ну о об однако он она они оно от очень по под при с со так также такой там те тем то того тоже той только том ты у уже хотя чего чей чем что чтобы чье чья эта эти это я какой какая какие какое каких каким какую каков сколько который которая которые нужно нужна нужен нужны надо можно должен должна должны является ли про через после также либо сейчас сегодня всего
   почему зачем куда откуда кому кем чему каков какова каковы каково вообще пожалуйста хочу узнать интересует
   расскажи расскажите покажи покажите подскажи подскажите найди найдите объясни объясните опиши опишите
-  перечисли перечислите дай дайте скажи скажите напомни напомните сводка сводку кратко коротко подробно подробнее ситуация ситуацию ситуации`.split(/\s+/));
+  перечисли перечислите дай дайте скажи скажите напомни напомните сводка сводку кратко коротко подробно подробнее ситуация ситуацию ситуации
+  чьи чью чьих чьим чьё кого какого каком какому`.split(/\s+/));
 
 const VOWEL = /[аеиоуыэюя]/;
 
@@ -67,7 +68,18 @@ const SYN = {
   постав: ['поставк', 'поставщик'], поставк: ['поставщик'], риск: ['отставан', 'срыв'],
   уведом: ['уведомлен'], уведомля: ['уведомлен'], уведомлен: ['уведомля'],
   совещан: ['протокол'], решил: ['решен', 'реш'], тьм: ['мост'],
+  // Сокращения: в документах обычно полная форма (сессия 9: «всм» → «нет в документах»).
+  всм: ['высокоскоростн'], жд: ['железнодорожн'],
 };
+
+// Одна опечатка: замена, пропуск или лишняя буква («бюлетени» → «бюллетени»).
+export function oneEdit(a, b) {
+  if (a === b || Math.abs(a.length - b.length) > 1) return false;
+  let i = 0;
+  while (i < a.length && a[i] === b[i]) i++;
+  if (a.length === b.length) return a.slice(i + 1) === b.slice(i + 1);
+  return a.length > b.length ? a.slice(i + 1) === b.slice(i) : a.slice(i) === b.slice(i + 1);
+}
 
 export function normalize(s) {
   return s.replace(/ /g, ' ').replace(/[‐-‒−]/g, '-').replace(/\s+/g, ' ').trim();
@@ -87,7 +99,7 @@ export function tokens(text) {
 }
 
 // Глагольные формы («находится», «работает») не считаем ключевыми словами вопроса.
-const VERBISH = /(ается|яется|ется|ится|утся|ются|ятся|ает|яет|еет|ует|ут|ют|ят|ать|ять|ить|еть|ыть|ться|ал|ял|ил|ел|ала|яла|ила|али|яли|или|ели)$/;
+const VERBISH = /(ается|яется|ется|ится|утся|ются|ятся|ает|яет|еет|ует|ут|ют|ят|ать|ять|ить|еть|ыть|уть|ться|ал|ял|ил|ел|ала|яла|ила|али|яли|или|ели)$/;
 export function verbLike(text) {
   return new Set((text.toLowerCase().replace(/ё/g, 'е').match(/[а-я]+/g) || []).filter((w) => w.length > 4 && VERBISH.test(w) && !STOP.has(w)).map(stem));
 }
@@ -126,12 +138,14 @@ export function chunkPages(docId, pages) {
     let buf = [];
     const flush = () => {
       if (!buf.length) return;
-      chunks.push({ id: `${docId}:${chunks.length}`, docId, pageIndex: pi, page: pg.n ?? null, section: pg.section ?? null, text: buf.join('\n') });
+      chunks.push({ id: `${docId}:${chunks.length}`, docId, pageIndex: pi, page: pg.n ?? null, section: pg.section ?? null, para: first + 1, text: buf.join('\n') });
       buf = [];
     };
-    for (const p of paras) {
-      if (p.includes(' | ')) { flush(); buf.push(p); flush(); continue; } // строка таблицы — отдельный фрагмент
+    let first = 0; // номер первого абзаца фрагмента в блоке — место в DOCX/TXT без страниц и заголовков
+    for (const [k, p] of paras.entries()) {
+      if (p.includes(' | ')) { flush(); first = k; buf.push(p); flush(); continue; } // строка таблицы — отдельный фрагмент
       if (buf.length && (buf.join(' ').length + p.length > 500)) flush();
+      if (!buf.length) first = k;
       buf.push(p);
     }
     flush();
@@ -169,10 +183,17 @@ export function search(index, query, { filter = () => true, extra = null, limit 
   const vocab = [...index.df.keys()];
   for (const t of q.base) {
     const v = new Map([[t, 1]]);
-    (SYN[t] || []).forEach((x) => v.set(x, 0.5));
+    for (const x of SYN[t] || []) {
+      v.set(x, 0.5);
+      if (x.length >= 5) vocab.forEach((y) => y.startsWith(x) && !v.has(y) && v.set(y, 0.5));
+    }
     if (!/^\d/.test(t) && t.length >= 5) {
       const pre = t.slice(0, Math.max(5, t.length - 2));
       vocab.forEach((x) => x.startsWith(pre) && !v.has(x) && v.set(x, 0.5));
+    }
+    // Слова нет в документах — пробуем как опечатку (только длинные основы: у коротких слишком много соседей).
+    if (!/^\d/.test(t) && t.length >= 6 && ![...v.keys()].some((x) => index.df.get(x))) {
+      vocab.forEach((x) => oneEdit(t, x) && v.set(x, 0.5));
     }
     variants.set(t, v);
   }

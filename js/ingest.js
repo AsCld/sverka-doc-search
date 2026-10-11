@@ -137,6 +137,13 @@ function loadPdfjs() {
   return pdfjsReady;
 }
 
+// Новый абзац PDF: увеличенный шаг строки, пункт списка или конец предложения + красная строка /
+// недописанная до правого края строка. Строки {y, x0, x1, s}; lh — обычный шаг строки.
+export function paraBreak(prev, l, lh, left, right) {
+  if (!prev || prev.y - l.y > lh * 1.3 || /^(\d{1,2}(\.\d{1,2})*\.\s|[•—–-]\s)/.test(l.s)) return true;
+  return /[.:;!?]$/.test(prev.s) && (l.x0 - left > 8 || right - prev.x1 > 30);
+}
+
 // Заголовок раздела: «2. Название» без точки в конце и крупнее основного текста.
 const HEADING = /^\d{1,2}\.\s+[А-ЯЁA-Z].{2,90}[^.]$/;
 
@@ -162,7 +169,7 @@ async function fromPdf(buf) {
       r.items.sort((a, b) => a.x - b.x);
       let s = '', end = null;
       for (const it of r.items) { s += (end !== null && it.x - end > 1 && !s.endsWith(' ') ? ' ' : '') + it.s; end = it.x + it.w; }
-      return { y: r.y, h: Math.max(...r.items.map((i) => i.h)), s: s.replace(/\s+/g, ' ').trim() };
+      return { y: r.y, x0: r.items[0].x, x1: end, h: Math.max(...r.items.map((i) => i.h)), s: s.replace(/\s+/g, ' ').trim() };
     }).filter((l) => l.s);
     pages.push(lines);
   }
@@ -176,23 +183,26 @@ async function fromPdf(buf) {
   let section = null;
   pages.forEach((lines, i) => {
     lines = lines.filter((l) => !repeated(l.s));
-    // Межстрочный интервал = наименьший заметный шаг; абзац — шаг больше него.
-    const lh = Math.min(...lines.slice(1).map((l, k) => lines[k].y - l.y).filter((g) => g > 4), 14);
+    // Шаг строки — нижний квартиль шагов. Раньше брали минимум с потолком 14 pt: при полуторном интервале
+    // госдокументов (~21 pt) каждая строка становилась абзацем, и цитата не находилась в тексте (сессия 9).
+    const gaps = lines.slice(1).map((l, k) => lines[k].y - l.y).filter((g) => g > 4).sort((a, b) => a - b);
+    const lh = gaps[Math.floor(gaps.length / 4)] || 14;
+    const left = Math.min(...lines.map((l) => l.x0)), right = Math.max(...lines.map((l) => l.x1));
     const hs = lines.map((l) => l.h).sort((a, b) => a - b);
     const bodyH = hs[Math.floor(hs.length / 2)] || 10;
     let cur = { n: i + 1, section, text: '' };
-    let prevY = null;
+    let prev = null;
     for (const l of lines) {
       if (HEADING.test(l.s) && l.h > bodyH * 1.08) {
         if (cur.text.trim()) blocks.push(cur);
         section = l.s;
         cur = { n: i + 1, section, text: '' };
-        prevY = l.y;
+        prev = l;
         continue;
       }
-      const newPara = prevY === null || prevY - l.y > lh * 1.3 || /^(\d{1,2}(\.\d{1,2})*\.\s|[•—–-]\s)/.test(l.s);
-      cur.text += (cur.text && newPara ? '\n' : cur.text ? ' ' : '') + l.s;
-      prevY = l.y;
+      const brk = paraBreak(prev, l, lh, left, right);
+      cur.text += (cur.text && brk ? '\n' : cur.text ? ' ' : '') + l.s;
+      prev = l;
     }
     if (cur.text.trim()) blocks.push(cur);
   });
