@@ -250,7 +250,8 @@ function toBlocks(text) {
 export function verifyModel(res, frags, docs) {
   let text = String(res.answer || '').replace(/\\n/g, '\n') // модель иногда экранирует переводы строк дважды
     .replace(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*(?:[:=[][\s\S]*)?$/, '') // протёкший в текст JSON, в т. ч. голое «quotes» в конце
-    .trim().replace(/["\s,]+$/, '') // хвост JSON, который иногда оставляет модель
+    .trim().replace(/["'\s,]+$/, '') // хвост JSON, который иногда оставляет модель
+    .replace(/^(\s*[-•]\s+)\*\*([^*\n]+)\*\*\s*$/gm, '$1$2') // пункт списка целиком жирным — шум
     .replace(/\]\s*,\s*\[/g, '][')
     .replace(/\[(\d+(?:\s*,\s*\d+)+)\]/g, (_, l) => l.split(/\s*,\s*/).map((n) => `[${n}]`).join(''));
   const refs = (s) => [...new Set([...s.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]))];
