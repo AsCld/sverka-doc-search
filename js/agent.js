@@ -177,7 +177,7 @@ export function ask({ question, history = [], scope, docs, collections }) {
     return {
       ...base, kind: 'noinfo', status: 'none', mode: 'extractive', context,
       blocks: [{ t: 'p', text: lead }, { t: 'note', text: note }],
-      sources: [], near, outside, searched: searchedWords, suggest: [], absent: r.absent.length > 0,
+      sources: [], near, outside, searched: searchedWords, suggest: [],
     };
   }
 
@@ -321,9 +321,8 @@ const where = (c) => [c.page && `стр. ${c.page}`, c.section].filter(Boolean).
 // onFound({ n, docs }) — сколько фрагментов и из каких документов уйдёт в модель (для экрана «ищу ответ»).
 export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
   const local = ask(params);
-  // Нет готовых документов, ответ явно в другой области или слова вопроса нет ни в одном документе
-  // («бюджет») — модель ничего не добавит, отвечаем сразу.
-  if (local.kind === 'noscope' || local.outside || local.absent) return local;
+  // Нет готовых документов или ответ явно в другой области — модель ничего не добавит.
+  if (local.kind === 'noscope' || local.outside) return local;
   const { question, history = [], docs } = params;
   const info = scopeInfo(params.scope, docs, params.collections);
   const { r, context } = retrieve(question, history, info, docs, MAX_FRAGS);
@@ -340,7 +339,9 @@ export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
       method: 'POST', signal: signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal || timeout,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        question,
+        // Уточнение («А кто за это отвечает?») сам по себе модель понимает слишком широко и перечисляет всех подряд —
+        // называем предмет явно.
+        question: context ? `${question} (уточнение к вопросу «${context}»)` : question,
         history: history.flatMap((m, i) => (m.role === 'user' && history[i + 1]?.answer ? [{ q: m.text, a: plainAnswer(history[i + 1].answer) }] : [])).slice(-2),
         fragments: frags.map((c) => ({ doc: docs.find((d) => d.id === c.docId).name, where: where(c), text: c.text })),
       }),
