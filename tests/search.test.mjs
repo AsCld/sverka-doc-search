@@ -130,6 +130,13 @@ test('оборванный по длине JSON модели: берём answer 
   assert.throws(() => salvage('', 'length'), /оборван \(length, 0 симв\.\)/);
 });
 
+test('уточняющий вопрос уходит в модель вместе с предметом прошлого вопроса', async () => {
+  let sent;
+  const history = [{ role: 'user', text: 'Сколько техники в ремонте?' }, { role: 'assistant', answer: { blocks: [{ t: 'p', text: '7 единиц' }] } }];
+  await askAI({ ...q, question: 'А почему?', history }, { fetchFn: async (u, o) => { sent = JSON.parse(o.body); return reply({ status: 'none', answer: 'нет' })(); } });
+  assert.equal(sent.question, 'А почему? (уточнение к вопросу «Сколько техники в ремонте?»)');
+});
+
 test('сбой функции модели: причина видна в «Как получен ответ»', async () => {
   const a = await askAI(q, { fetchFn: reply({ error: 'model_error', detail: 'ответ модели оборван (length, 0 симв.)' }, 502) });
   assert.equal(a.mode, 'extractive');
@@ -158,10 +165,8 @@ test('модель не дала цитат — у каждого утвержд
   assert.equal(v.sources[0].quote, 'Срок завершения бетонирования опор — 20.10.2026 согласно протоколу. Бетонирование тела опор начнётся после поставки остатка арматуры.');
 });
 
-test('слова вопроса нет ни в одном документе — «нет в документах» сразу, модель не вызывается', async () => {
-  let called = false;
-  const a = await askAI({ ...q, question: 'Какой бюджет на технику?' }, { fetchFn: async () => { called = true; return reply({})(); } });
-  assert.equal(called, false);
-  assert.equal(a.kind, 'noinfo');
-  assert.match(a.blocks.at(-1).text, /бюджет/);
+test('вопросительные и «просящие» слова не делают вопрос «без ответа»', () => {
+  const a = ask({ ...q, question: 'Подскажите, почему техника в ремонте?' });
+  assert.equal(a.kind, 'answer');
+  assert.equal(ask({ ...q, question: 'Какой бюджет на технику?' }).kind, 'noinfo');
 });
