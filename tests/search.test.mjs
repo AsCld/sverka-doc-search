@@ -227,3 +227,17 @@ test('у фрагмента без страниц и разделов есть �
   const ch = chunkPages('x', [{ n: null, section: null, text: 'А'.repeat(400) + '\n' + 'Б'.repeat(400) + '\nВ' }]);
   assert.deepEqual(ch.map((c) => c.para), [1, 2]);
 });
+
+test('модель зациклилась (ответ оборван по длине) — один повтор с 4 лучшими фрагментами', async () => {
+  const sent = [];
+  const fetchFn = async (url, o) => {
+    sent.push(JSON.parse(o.body).fragments.length);
+    return sent.length === 1
+      ? { ok: false, status: 502, json: async () => ({ error: 'model_error', detail: 'ответ модели оборван (length, 0 симв.)' }) }
+      : { ok: true, status: 200, json: async () => ({ status: 'answer', answer: 'В ремонте **7** единиц [1].', quotes: [{ n: 1, quote: 'из них 7 в ремонте' }] }) };
+  };
+  const many = { ...q, docs: [{ ...docs[0], blocks: Array.from({ length: 6 }, (_, i) => ({ n: i + 1, section: null, text: `Техника участка ${i}: 96 единиц, из них 7 в ремонте.` })) }] };
+  const a = await askAI(many, { fetchFn });
+  assert.equal(a.mode, 'model');
+  assert.deepEqual(sent, [6, 4]);
+});
