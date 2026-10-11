@@ -120,4 +120,48 @@ test('функция модели отрезает протёкший в отв�
   assert.equal(repair({ answer: 'Обычный ответ [1].' }).answer, 'Обычный ответ [1].');
   assert.equal(repair({ answer: 'Риски:\\n- первый [1]' }).answer, 'Риски:\n- первый [1]');
   assert.equal(repair({ answer: 'Срок — 20.10.2026 [1][2].\n\nquotes [\n{' }).answer, 'Срок — 20.10.2026 [1][2].');
+  assert.equal(repair({ answer: 'Срок — 20.10.2026 [4][1].  quotes' }).answer, 'Срок — 20.10.2026 [4][1].'); // живой GigaChat, 11.10
+});
+
+test('оборванный по длине JSON модели: берём answer и законченные цитаты; без answer — понятная ошибка', async () => {
+  const { salvage } = await import('../api/ask.js');
+  const r = salvage('{"status": "answer", "answer": "Срок — **20.10.2026** [1].", "quotes": [{"n": 1, "quote": "Срок — 20.10.2026"}, {"n": 2, "quote": "обор', 'length');
+  assert.deepEqual(r, { status: 'answer', answer: 'Срок — **20.10.2026** [1].', quotes: [{ n: 1, quote: 'Срок — 20.10.2026' }] });
+  assert.throws(() => salvage('', 'length'), /оборван \(length, 0 симв\.\)/);
+});
+
+test('сбой функции модели: причина видна в «Как получен ответ»', async () => {
+  const a = await askAI(q, { fetchFn: reply({ error: 'model_error', detail: 'ответ модели оборван (length, 0 симв.)' }, 502) });
+  assert.equal(a.mode, 'extractive');
+  assert.match(a.fallback, /оборван/);
+});
+
+test('лишняя ссылка без ключевого факта убирается, цитата — предложение с этим фактом', async () => {
+  const { verifyModel } = await import('../js/agent.js');
+  const d = [{ id: 'p', name: 'Протокол.docx' }, { id: 'r', name: 'Отчёт.pdf' }];
+  const frags = [
+    { docId: 'p', section: 'Решили', text: 'Установить срок бетонирования опор — 20.10.2026. Ответственный — Гусев Д.А.' },
+    { docId: 'r', page: 4, text: 'Последствие: сдвиг бетонирования опор моста.' },
+  ];
+  const v = verifyModel({ answer: 'За бетонирование опор отвечает Гусев Д.А. [1][2]. quotes',
+    quotes: [{ n: 1, quote: 'Установить срок бетонирования опор — 20.10.2026' }, { n: 2, quote: 'сдвиг бетонирования опор моста' }] }, frags, d);
+  assert.equal(v.sources.length, 1);
+  assert.match(v.sources[0].quote, /20\.10\.2026\. Ответственный — Гусев Д\.А/);
+  assert.equal(v.blocks.at(-1).text, 'За бетонирование опор отвечает Гусев Д.А. [1].');
+});
+
+test('модель не дала цитат — у каждого утверждения своё предложение фрагмента, с ключевым фактом', async () => {
+  const { verifyModel } = await import('../js/agent.js');
+  const d = [{ id: 'r', name: 'Отчёт.pdf' }];
+  const frags = [{ docId: 'r', page: 3, text: 'Ростверки опор выполнены. Срок завершения бетонирования опор — 20.10.2026 согласно протоколу. Бетонирование тела опор начнётся после поставки остатка арматуры.' }];
+  const v = verifyModel({ answer: 'Срок бетонирования опор — **20.10.2026** [1]. Бетонирование начнётся после поставки остатка арматуры [1].', quotes: [] }, frags, d);
+  assert.equal(v.sources[0].quote, 'Срок завершения бетонирования опор — 20.10.2026 согласно протоколу. Бетонирование тела опор начнётся после поставки остатка арматуры.');
+});
+
+test('слова вопроса нет ни в одном документе — «нет в документах» сразу, модель не вызывается', async () => {
+  let called = false;
+  const a = await askAI({ ...q, question: 'Какой бюджет на технику?' }, { fetchFn: async () => { called = true; return reply({})(); } });
+  assert.equal(called, false);
+  assert.equal(a.kind, 'noinfo');
+  assert.match(a.blocks.at(-1).text, /бюджет/);
 });
