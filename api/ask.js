@@ -131,9 +131,11 @@ export default async function handler(req, res) {
       messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }],
       functions: [ANSWER_FN],
       function_call: { name: 'answer' },
-      // Без предела модель иногда «зацикливается» и пишет минуту; 1000 не хватало сводкам (GigaChat при обрыве
-      // вызова функции возвращает пустой ответ). ~1500 токенов — около 30 с, браузер ждёт до 45 с.
-      max_tokens: 1500,
+      // Без предела модель иногда «зацикливается» и пишет минуту (при обрыве вызова функции GigaChat возвращает пустой
+      // ответ). 1500 токенов не помогли — зацикленный ответ упирался и в них, только ждать дольше (32 с вместо 21).
+      // Поэтому предел 1000 и лёгкий штраф за повторы.
+      max_tokens: 1000,
+      repetition_penalty: 1.07,
     });
     if (r.status !== 200) {
       return res.status(r.status === 429 ? 429 : 502).json({ error: r.status === 429 ? 'rate_limit' : 'model_error', detail: s(r.json.message, 300) });
