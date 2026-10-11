@@ -19,13 +19,14 @@ const agent = new https.Agent({ ca: [...tls.rootCertificates, ...RU_CA], keepAli
 const SYSTEM = `Ты — агент поиска по рабочим документам (регламенты, протоколы, отчёты, планы). Отвечай по-русски.
 Правила:
 1. Используй только факты из пронумерованных фрагментов. Ничего не добавляй от себя и не додумывай.
-2. После каждого утверждения ставь ссылку на фрагмент: [1], [2]. Ссылайся только на фрагменты, которые действительно подтверждают утверждение.
+2. После каждого утверждения ставь ссылку на фрагмент: [1], [2]. Ссылайся только на фрагменты, где есть сам факт (дата, число, ФИО), — обычно 1–2 ссылки, а не все подряд.
 3. В quotes для КАЖДОГО фрагмента, на который ссылаешься, дай одну дословную цитату из него: точная копия подряд идущего текста фрагмента, 1–2 предложения, без пересказа, сокращений и многоточий.
 4. Нет ответа во фрагментах — status "none", answer — одно предложение, чего именно нет в документах, quotes пустой. Ответ есть лишь частично — status "partial", в missing коротко укажи, чего не хватает.
-5. Пиши кратко: 1–3 абзаца или список (каждый пункт — строка, начинающаяся с "- "). Ключевые факты (даты, числа, ФИО) выделяй **так** и пиши точно как в документе (20.10.2026, а не «20 октября»). Без заголовков и таблиц.
+5. Пиши кратко: первое предложение — прямой ответ на вопрос; дальше, если нужно, 1–2 абзаца или список (каждый пункт — строка, начинающаяся с "- "). Ключевые факты (даты, числа, ФИО) выделяй **так** и пиши точно как в документе (20.10.2026, а не «20 октября»). Без заголовков и таблиц.
 6. Уточняющий вопрос («а кто за это отвечает?», «почему?») относится к предмету предыдущего вопроса: отвечай только про него, а не про всё подряд во фрагментах.
 7. Если фрагменты расходятся (например, разные протоколы), приведи оба варианта и укажи, какой документ новее.
-8. В suggest дай 2 коротких уточняющих вопроса, на которые, судя по фрагментам, тоже есть ответ.
+8. Каждое утверждение — о том же объекте и событии, о котором спросили. Фрагмент с похожими словами о другом (другая проверка, другое нарушение, другая опора, другой месяц) не используй.
+9. В suggest дай 2 коротких уточняющих вопроса, на которые, судя по фрагментам, тоже есть ответ.
 Ответ верни вызовом функции answer.`;
 
 // Ответ модели принимаем вызовом функции: так GigaChat возвращает JSON по схеме, а не свободный текст.
@@ -49,13 +50,22 @@ const s = (v, max) => String(v ?? '').slice(0, max);
 
 // GigaChat иногда «протекает»: дописывает остаток JSON (quotes, status…) внутрь строки answer.
 // Отрезаем протечку и, если массив quotes пуст, достаём цитаты из неё. Факты не трогаем — их сверяет браузер.
+const quotesIn = (t) => [...t.matchAll(/"?n"?\s*:\s*(\d+)\s*,\s*"?quote"?\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
+  .map((m) => ({ n: +m[1], quote: m[2].replace(/\\"/g, '"') }));
+
 export function repair(out) {
   const a = String(out.answer ?? '').replace(/\\n/g, '\n'); // иногда переводы строк экранированы дважды
-  const leak = a.search(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*[:=[]/);
+  const leak = a.search(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*(?:[:=[]|$)/); // в т. ч. голое «quotes» в конце
   if (leak < 0) return { ...out, answer: a };
-  const quotes = [...a.slice(leak).matchAll(/"?n"?\s*:\s*(\d+)\s*,\s*"?quote"?\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
-    .map((m) => ({ n: +m[1], quote: m[2].replace(/\\"/g, '"') }));
-  return { ...out, answer: a.slice(0, leak), quotes: out.quotes?.length ? out.quotes : quotes };
+  return { ...out, answer: a.slice(0, leak), quotes: out.quotes?.length ? out.quotes : quotesIn(a.slice(leak)) };
+}
+
+// JSON ответа оборван (упёрся в max_tokens): берём то, что пришло целиком, — answer и законченные цитаты.
+// Нет даже answer — ошибка с причиной, её видно в «Как получен ответ».
+export function salvage(raw, finish) {
+  const m = raw.match(/"answer"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (!m) throw new Error(`ответ модели оборван (${finish || 'причина неизвестна'}, ${raw.length} симв.)`);
+  return { status: /"status"\s*:\s*"partial"/.test(raw) ? 'partial' : 'answer', answer: JSON.parse(`"${m[1]}"`), quotes: quotesIn(raw) };
 }
 
 function post(url, headers, body) {
@@ -126,9 +136,12 @@ export default async function handler(req, res) {
     if (r.status !== 200) {
       return res.status(r.status === 429 ? 429 : 502).json({ error: r.status === 429 ? 'rate_limit' : 'model_error', detail: s(r.json.message, 300) });
     }
-    const msg = r.json.choices?.[0]?.message || {};
-    let out = msg.function_call?.arguments ?? msg.content;
-    if (typeof out === 'string') out = JSON.parse(out.replace(/^```(?:json)?\s*|\s*```$/g, ''));
+    const choice = r.json.choices?.[0] || {};
+    let out = choice.message?.function_call?.arguments ?? choice.message?.content ?? '';
+    if (typeof out === 'string') {
+      const raw = out.replace(/^```(?:json)?\s*|\s*```$/g, '');
+      try { out = JSON.parse(raw); } catch { out = salvage(raw, choice.finish_reason); }
+    }
     return res.status(200).json({ ...repair(out), model: MODEL });
   } catch (e) {
     return res.status(502).json({ error: 'model_error', detail: s(e.message, 300) });
