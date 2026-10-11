@@ -177,7 +177,7 @@ export function ask({ question, history = [], scope, docs, collections }) {
     return {
       ...base, kind: 'noinfo', status: 'none', mode: 'extractive', context,
       blocks: [{ t: 'p', text: lead }, { t: 'note', text: note }],
-      sources: [], near, outside, searched: searchedWords, suggest: [],
+      sources: [], near, outside, searched: searchedWords, suggest: [], absent: r.absent.length > 0,
     };
   }
 
@@ -246,37 +246,62 @@ function toBlocks(text) {
 //    не меньше половины слов утверждения; иначе ссылка не подтверждена.
 // Плюс каждое число и дата из утверждения должны встречаться в цитируемых фрагментах —
 // так ловится самая частая выдумка модели. Не прошла хоть одна проверка — ответ отклоняется.
+// Лишние ссылки (во фрагменте нет ни одного ключевого факта утверждения) убираются, если остаются другие.
 export function verifyModel(res, frags, docs) {
-  const text = String(res.answer || '').replace(/\\n/g, '\n') // модель иногда экранирует переводы строк дважды
-    .replace(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*[:=[][\s\S]*$/, '') // протёкший в текст JSON
+  let text = String(res.answer || '').replace(/\\n/g, '\n') // модель иногда экранирует переводы строк дважды
+    .replace(/["\s,]*"?\b(quotes|status|missing|suggest)"?\s*(?:[:=[][\s\S]*)?$/, '') // протёкший в текст JSON, в т. ч. голое «quotes» в конце
     .trim().replace(/["\s,]+$/, '') // хвост JSON, который иногда оставляет модель
     .replace(/\]\s*,\s*\[/g, '][')
     .replace(/\[(\d+(?:\s*,\s*\d+)+)\]/g, (_, l) => l.split(/\s*,\s*/).map((n) => `[${n}]`).join(''));
-  const cited = [...new Set([...text.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]))];
-  if (!cited.length) return { failed: 'в ответе нет ссылок на фрагменты' };
-  if (cited.some((n) => !frags[n - 1])) return { failed: 'ссылка на несуществующий фрагмент' };
+  const refs = (s) => [...new Set([...s.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]))];
+  if (!refs(text).length) return { failed: 'в ответе нет ссылок на фрагменты' };
+  if (refs(text).some((n) => !frags[n - 1])) return { failed: 'ссылка на несуществующий фрагмент' };
+  const hay = (n) => `${frags[n - 1].text} ${docs.find((d) => d.id === frags[n - 1].docId)?.name || ''}`;
 
-  const claims = new Map(); // n → текст утверждений, которые на него ссылаются
+  const claims = new Map(); // n → утверждения, которые на него ссылаются
   for (const sent of text.split('\n').flatMap((l) => sentences(l))) {
-    const ns = [...sent.matchAll(/\[(\d+)\]/g)].map((m) => +m[1]);
+    let ns = refs(sent);
     if (!ns.length) continue;
     const claim = sent.replace(/\[\d+\]|\*\*/g, ' ');
+    const fs = facts(claim);
+    if (fs.length && ns.length > 1) {
+      const keep = ns.filter((n) => hasFact(hay(n), fs));
+      if (keep.length && keep.length < ns.length) {
+        text = text.replace(sent, sent.replace(/\s*\[(\d+)\]/g, (m, n) => (keep.includes(+n) ? m : '')));
+        ns = keep;
+      }
+    }
     // Числа источников: текст фрагментов и названия документов; дата 28.09.2026 засчитывает и «28».
-    const inSources = new Set(ns.flatMap((n) => tokens(`${frags[n - 1].text} ${docs.find((d) => d.id === frags[n - 1].docId)?.name || ''}`))
+    const inSources = new Set(ns.flatMap((n) => tokens(hay(n)))
       .flatMap((t) => (/^\d/.test(t) ? [t, ...t.split(/[.,]/).map((x) => x.replace(/^0+(?=\d)/, ''))] : [])));
     const num = tokens(claim).find((t) => /^\d/.test(t) && !inSources.has(t) && !inSources.has(t.replace(/^0+(?=\d)/, '')));
     if (num) return { failed: `число «${num}» не найдено в источниках ${ns.map((n) => `[${n}]`).join('')}` };
-    for (const n of ns) claims.set(n, `${claims.get(n) || ''} ${claim}`);
+    for (const n of ns) claims.set(n, [...(claims.get(n) || []), claim]);
   }
 
+  const cited = refs(text);
   const sources = [];
   for (const n of cited) {
     const chunk = frags[n - 1];
+    const ss = sentences(chunk.text);
+    const own = claims.get(n) || [];
+    const fs = facts(own.join(' '));
     let quote = (res.quotes || []).filter((q) => q.n === n).map((q) => findQuote(chunk.text, q.quote)).find(Boolean);
+    if (quote && fs.length && !hasFact(quote, fs)) {
+      // Цитата модели есть в тексте, но без ключевого факта (срок, число, фамилия) — показываем предложение с ним.
+      const i = ss.findIndex((x) => hasFact(x, fs));
+      if (i >= 0) quote = ss[i].length < 40 && i ? `${ss[i - 1]} ${ss[i]}` : ss[i];
+    }
     if (!quote) {
-      const want = new Set(tokens(claims.get(n) || ''));
-      const best = sentences(chunk.text).map((x) => ({ x, k: tokens(x).filter((t) => want.has(t)).length })).sort((a, b) => b.k - a.k)[0];
-      if (best && want.size && best.k / want.size >= 0.5) quote = best.x;
+      // Модель цитату не дала или исказила: для каждого утверждения — предложение фрагмента с не меньше чем
+      // половиной его слов (при равенстве — с ключевым фактом); цитата — эти предложения в порядке текста.
+      const best = new Set(own.map((c) => {
+        const want = new Set(tokens(c)), cf = facts(c);
+        const top = ss.map((x) => ({ x, k: tokens(x).filter((t) => want.has(t)).length / (want.size || 1) + (hasFact(x, cf) ? 0.01 : 0) }))
+          .sort((a, b) => b.k - a.k)[0];
+        return top && top.k >= 0.5 ? top.x : null;
+      }).filter(Boolean));
+      if (best.size) quote = ss.filter((x) => best.has(x)).join(' ');
     }
     if (!quote) return { failed: `ссылка [${n}] не подтверждается текстом фрагмента` };
     sources.push(sourceFromChunk(sources.length + 1, chunk, docs, quote));
@@ -284,14 +309,21 @@ export function verifyModel(res, frags, docs) {
   return { sources, blocks: toBlocks(text.replace(/\[(\d+)\]/g, (_, n) => `[${cited.indexOf(+n) + 1}]`)) };
 }
 
+// Ключевые факты утверждения: даты, числа от двух цифр, фамилии перед инициалами (без окончания: Гусев → «гусе»).
+const FACT_RE = /\d{1,2}\.\d{2}\.\d{4}|\d{2,}(?:[.,]\d+)?|[А-ЯЁ][а-яё]{3,}(?=\s+[А-ЯЁ]\.\s?[А-ЯЁ]\.)/g;
+const low = (s) => s.toLowerCase().replace(/ё/g, 'е');
+const facts = (s) => [...new Set((s.match(FACT_RE) || []).map((f) => low(/^\d/.test(f) ? f : f.slice(0, -1))))];
+const hasFact = (s, fs) => { const t = low(s); return fs.some((f) => t.includes(f)); };
+
 const plainAnswer = (a) => a.blocks.map((b) => b.text || (b.items || []).map((x) => x.text || x).join('; ')).join(' ');
 const where = (c) => [c.page && `стр. ${c.page}`, c.section].filter(Boolean).join(', ') || 'начало документа';
 
 // onFound({ n, docs }) — сколько фрагментов и из каких документов уйдёт в модель (для экрана «ищу ответ»).
 export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
   const local = ask(params);
-  // Нет готовых документов или ответ явно в другой области — модель ничего не добавит.
-  if (local.kind === 'noscope' || local.outside) return local;
+  // Нет готовых документов, ответ явно в другой области или слова вопроса нет ни в одном документе
+  // («бюджет») — модель ничего не добавит, отвечаем сразу.
+  if (local.kind === 'noscope' || local.outside || local.absent) return local;
   const { question, history = [], docs } = params;
   const info = scopeInfo(params.scope, docs, params.collections);
   const { r, context } = retrieve(question, history, info, docs, MAX_FRAGS);
@@ -313,8 +345,10 @@ export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
         fragments: frags.map((c) => ({ doc: docs.find((d) => d.id === c.docId).name, where: where(c), text: c.text })),
       }),
     });
-    res = resp.ok ? await resp.json() : null;
-    if (!res) return fallback(resp.status === 429 ? 'исчерпан лимит запросов к модели' : 'модель не ответила');
+    res = await resp.json().catch(() => ({}));
+    if (resp.status === 429) return fallback('исчерпан лимит запросов к модели');
+    // Причину сбоя от функции (например, «ответ модели оборван») показываем в «Как получен ответ» — для диагностики.
+    if (!resp.ok) return fallback(`модель не ответила${res.detail ? ` — ${String(res.detail).slice(0, 120)}` : ''}`);
   } catch (e) {
     if (e.name === 'AbortError') throw e; // остановил пользователь
     return fallback(e.name === 'TimeoutError' ? 'модель не ответила за 45 с' : 'модель недоступна');

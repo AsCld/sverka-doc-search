@@ -237,7 +237,9 @@ function switchRole(r, from) {
   const root = document.documentElement;
   if (b) { root.style.setProperty('--vx', `${b.left + b.width / 2}px`); root.style.setProperty('--vy', `${b.top + b.height / 2}px`); }
   root.classList.add('vt-role');
-  document.startViewTransition(run).finished.finally(() => root.classList.remove('vt-role'));
+  const t = document.startViewTransition(run);
+  t.ready.catch(() => {}); // вкладка скрыта — браузер пропускает переход, это не ошибка
+  t.finished.finally(() => root.classList.remove('vt-role'));
 }
 
 async function profile(btn) {
