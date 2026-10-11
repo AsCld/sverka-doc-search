@@ -184,3 +184,46 @@ test('вопросительные и «просящие» слова не де�
   assert.equal(a.kind, 'answer');
   assert.equal(ask({ ...q, question: 'Какой бюджет на технику?' }).kind, 'noinfo');
 });
+
+// ---------- Сессия 9: находки на реальных документах ----------
+import { verifyModel } from '../js/agent.js';
+import { docBody } from '../js/viewer.js';
+import { paraBreak } from '../js/ingest.js';
+
+test('опечатка, сокращение «ВСМ» и «чьи» не дают ложного «нет в документах»', () => {
+  const idx = buildIndex(chunkPages('r', [{ n: 2, section: null, text: 'Подписанные бюллетени направить до 24 марта 2022 г., число голосовавших — 15.\nСоздание подвижного состава для высокоскоростных магистралей на 200–400 км/ч.\nПолномочия Гончарова С.Е. прекратились.' }]));
+  for (const q of ['до какого числа бюлетени скинуть', 'какой подвижной состав для ВСМ', 'Чьи полномочия прекратились?']) {
+    const r = search(idx, q);
+    assert.deepEqual(r.absent, [], q);
+    assert.ok(r.results.length, q);
+  }
+});
+
+test('сверка убирает продублированную цитату и вопросы-подсказки из текста ответа', () => {
+  const frags = [{ docId: 'd', page: 2, section: null, pageIndex: 0, text: 'Подписанные бюллетени предложено направить в срок до 24 марта 2022 г. (включительно).' }];
+  const v = verifyModel({ answer: 'Бюллетени нужно было направить до **24 марта 2022 г.** [1]\\nЦитата: \\"в срок до 24 марта 2022 г.\\" [1]\\nКто отвечал за сбор?', quotes: [] }, frags, [{ id: 'd', name: 'Протокол.pdf' }]);
+  assert.ok(!v.failed, v.failed);
+  const text = v.blocks.map((b) => b.text).join('\n');
+  assert.doesNotMatch(text, /Цитата|\\"|\?/);
+});
+
+test('цитата через перенос строки подсвечивается в документе', () => {
+  const d = { blocks: [{ n: 4, section: null, text: 'Всего выявлено 15 428 нарушений требований\nзаконодательства Российской Федерации.' }] };
+  const b = docBody(d, { blockIndex: 0, quote: 'выявлено 15 428 нарушений требований законодательства' });
+  assert.ok(b.found);
+  assert.equal((b.html.match(/<mark/g) || []).length, 2);
+});
+
+test('PDF с полуторным интервалом: строки одного абзаца склеиваются, красная строка — новый абзац', () => {
+  const line = (y, x0, x1, s) => ({ y, x0, x1, s });
+  const a = line(700, 85, 540, 'Всего выявлено 15 428 нарушений требований');
+  const b = line(679, 85, 300, 'законодательства Российской Федерации.');
+  const c = line(658, 120, 540, 'Выдано 193 предписания по устранению нарушений.');
+  assert.equal(paraBreak(a, b, 21, 85, 540), false);
+  assert.equal(paraBreak(b, c, 21, 85, 540), true);
+});
+
+test('у фрагмента без страниц и разделов есть номер абзаца', () => {
+  const ch = chunkPages('x', [{ n: null, section: null, text: 'А'.repeat(400) + '\n' + 'Б'.repeat(400) + '\nВ' }]);
+  assert.deepEqual(ch.map((c) => c.para), [1, 2]);
+});
