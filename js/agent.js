@@ -287,21 +287,20 @@ export function verifyModel(res, frags, docs) {
     const own = claims.get(n) || [];
     const fs = facts(own.join(' '));
     let quote = (res.quotes || []).filter((q) => q.n === n).map((q) => findQuote(chunk.text, q.quote)).find(Boolean);
-    if (quote && fs.length && !hasFact(quote, fs)) {
-      // Цитата модели есть в тексте, но без ключевого факта (срок, число, фамилия) — показываем предложение с ним.
-      const i = ss.findIndex((x) => hasFact(x, fs));
-      if (i >= 0) quote = ss[i].length < 40 && i ? `${ss[i - 1]} ${ss[i]}` : ss[i];
-    }
     if (!quote) {
       // Модель цитату не дала или исказила: для каждого утверждения — предложение фрагмента с не меньше чем
-      // половиной его слов (при равенстве — с ключевым фактом); цитата — эти предложения в порядке текста.
+      // половиной его слов; цитата — эти предложения в порядке текста.
       const best = new Set(own.map((c) => {
-        const want = new Set(tokens(c)), cf = facts(c);
-        const top = ss.map((x) => ({ x, k: tokens(x).filter((t) => want.has(t)).length / (want.size || 1) + (hasFact(x, cf) ? 0.01 : 0) }))
-          .sort((a, b) => b.k - a.k)[0];
+        const want = new Set(tokens(c));
+        const top = ss.map((x) => ({ x, k: tokens(x).filter((t) => want.has(t)).length / (want.size || 1) })).sort((a, b) => b.k - a.k)[0];
         return top && top.k >= 0.5 ? top.x : null;
       }).filter(Boolean));
       if (best.size) quote = ss.filter((x) => best.has(x)).join(' ');
+    }
+    if (quote && fs.length && !hasFact(quote, fs)) {
+      // Цитата верна, но без ключевого факта (срок, число, фамилия) — показываем предложение с ним.
+      const i = ss.findIndex((x) => hasFact(x, fs));
+      if (i >= 0) quote = ss[i].length < 40 && i ? `${ss[i - 1]} ${ss[i]}` : ss[i];
     }
     if (!quote) return { failed: `ссылка [${n}] не подтверждается текстом фрагмента` };
     sources.push(sourceFromChunk(sources.length + 1, chunk, docs, quote));
