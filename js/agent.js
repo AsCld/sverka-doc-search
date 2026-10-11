@@ -335,7 +335,7 @@ export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
   const info = scopeInfo(params.scope, docs, params.collections);
   const { r, context } = retrieve(question, history, info, docs, MAX_FRAGS);
   if (!r.results.length) return local;
-  const frags = r.results.map((x) => x.chunk);
+  let frags = r.results.map((x) => x.chunk);
   onFound?.({ n: frags.length, docs: [...new Set(frags.map((c) => docs.find((d) => d.id === c.docId).name))] });
   const fallback = (why) => ({ ...local, fallback: why });
 
@@ -343,7 +343,7 @@ export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
   try {
     // Ждём модель не дольше 45 с: дальше ответ поиска полезнее, чем спиннер.
     const timeout = AbortSignal.timeout(45000);
-    const resp = await fetchFn(API_URL, {
+    const send = () => fetchFn(API_URL, {
       method: 'POST', signal: signal && AbortSignal.any ? AbortSignal.any([signal, timeout]) : signal || timeout,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -354,7 +354,15 @@ export async function askAI(params, { signal, fetchFn = fetch, onFound } = {}) {
         fragments: frags.map((c) => ({ doc: docs.find((d) => d.id === c.docId).name, where: where(c), text: c.text })),
       }),
     });
+    let resp = await send();
     res = await resp.json().catch(() => ({}));
+    // GigaChat иногда зацикливается и упирается в предел длины (сессия 9: 5 из 36 вопросов по реальным документам) —
+    // один повтор с 4 лучшими фрагментами, в пределах тех же 45 с.
+    if (resp.status === 502 && /оборван \(length/.test(res.detail || '') && frags.length > 4) {
+      frags = frags.slice(0, 4);
+      resp = await send();
+      res = await resp.json().catch(() => ({}));
+    }
     if (resp.status === 429) return fallback('исчерпан лимит запросов к модели');
     // Причину сбоя от функции (например, «ответ модели оборван») показываем в «Как получен ответ» — для диагностики.
     if (!resp.ok) return fallback(`модель не ответила${res.detail ? ` — ${String(res.detail).slice(0, 120)}` : ''}`);
